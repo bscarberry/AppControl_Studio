@@ -1,0 +1,58 @@
+[
+  {
+    "Id": 3076,
+    "TimeCreated": {
+      "SystemTime": "2024-11-15T09:23:41.847Z"
+    },
+    "MachineName": "WORKSTATION-01.corp.example.com",
+    "Message": "Code Integrity determined that a process attempted to load a binary that did not meet the requirements.",
+    "Properties": [
+      { "Value": "C:\\Users\\user1\\Downloads\\app_installer.exe" },
+      { "Value": "C:\\Windows\\explorer.exe" },
+      { "Value": "A1B2C3D4E5F6A7B8C9D0E1F2A3B4C5D6E7F8A9B0C1D2E3F4A5B6C7D8E9F0A1B2" },
+      { "Value": "A1B2C3D4E5F6A7B8C9D0E1F2A3B4C5D6E7F8A9B0" },
+      { "Value": "app_installer.exe" }
+    ]
+  },
+  {
+    "Id": 3077,
+    "TimeCreated": {
+      "SystemTime": "2024-11-15T09:31:18.123Z"
+    },
+    "MachineName": "WORKSTATION-01.corp.example.com",
+    "Message": "Code Integrity policy would have blocked script from loading but is in audit mode.",
+    "Properties": [
+      { "Value": "C:\\Temp\\deploy.ps1" },
+      { "Value": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" },
+      { "Value": "B2C3D4E5F6A7B8C9D0E1F2A3B4C5D6E7F8A9B0C1D2E3F4A5B6C7D8E9F0A1B2C3" },
+      { "Value": "B2C3D4E5F6A7B8C9D0E1F2A3B4C5D6E7F8A9B0C1" }
+    ]
+  },
+  {
+    "Id": 3076,
+    "TimeCreated": {
+      "SystemTime": "2024-11-15T10:05:52.000Z"
+    },
+    "MachineName": "WORKSTATION-02.corp.example.com",
+    "Message": "Code Integrity policy would have blocked binary but is in audit mode.",
+    "Properties": [
+      { "Value": "C:\\Program Files (x86)\\Vendor\\VendorApp\\VendorApp.exe" },
+      { "Value": "C:\\Windows\\System32\\svchost.exe" },
+      { "Value": "C4D5E6F7A8B9C0D1E2F3A4B5C6D7E8F9A0B1C2D3E4F5A6B7C8D9E0F1A2B3C4D5" },
+      { "Value": "C4D5E6F7A8B9C0D1E2F3A4B5C6D7E8F9A0B1C2D3" }
+    ]
+  },
+  {
+    "Id": 3089,
+    "TimeCreated": {
+      "SystemTime": "2024-11-15T11:42:09.555Z"
+    },
+    "MachineName": "SERVER-DC01.corp.example.com",
+    "Message": "The file was blocked from loading due to a supplemental policy.",
+    "Properties": [
+      { "Value": "C:\\Tools\\AdminTool.exe" },
+      { "Value": "C:\\Windows\\System32\\cmd.exe" },
+      { "Value": "D5E6F7A8B9C0D1E2F3A4B5C6D7E8F9A0B1C2D3E4F5A6B7C8D9E0F1A2B3C4D5E6" }
+    ]
+  }
+]
