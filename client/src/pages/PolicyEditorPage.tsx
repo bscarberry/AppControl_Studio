@@ -157,7 +157,7 @@ export function PolicyEditorPage() {
                 {tab.label}
                 {tab.id === "file-rules" && (
                   <span className="ml-1 px-1 rounded bg-surface-3 text-text-muted text-xs">
-                    {activeSession.policy.fileRules.filter((r) => r.type !== "FileAttrib").length}
+                    {activeSession.policy.fileRules.filter((r) => r.kind !== "fileAttrib").length}
                   </span>
                 )}
                 {tab.id === "signers" && (
