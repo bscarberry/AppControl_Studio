@@ -1,3 +1,62 @@
-export * from "./policy";
-export * from "./events";
-export * from "./api";
+// Value exports
+export { POLICY_RULE_OPTIONS, SIGNING_SCENARIO } from "./policy";
+export { CI_EVENT_IDS } from "./events";
+
+// Type re-exports from policy
+export type {
+  PolicyRuleOptionNumber,
+  PolicyRuleOption,
+  SigningScenarioValue,
+  WdacEku,
+  FileRuleType,
+  HashType,
+  WdacFileRule,
+  WdacCertRoot,
+  CertRootType,
+  WdacCertEku,
+  WdacSignerRule,
+  AllowedSigner,
+  DeniedSigner,
+  WdacSigningScenario,
+  PolicyType,
+  WdacPolicy,
+  DiffStatus,
+  OptionDiff,
+  FileRuleDiff,
+  SignerDiff,
+  ScenarioDiff,
+  PolicyComparisonResult,
+} from "./policy";
+
+// Type re-exports from events
+export type {
+  CiEventId,
+  EventSource,
+  EventSeverity,
+  ParsedCiEvent,
+  AdvancedHuntingRow,
+  EventImportSummary,
+  EventImportResult,
+} from "./events";
+
+// Type re-exports from api
+export type {
+  ApiSuccess,
+  ApiError,
+  ApiResponse,
+  ParsePolicyRequest,
+  ParsePolicyResponse,
+  GeneratePolicyRequest,
+  GeneratePolicyResponse,
+  ComparePoliciesRequest,
+  ComparePoliciesResponse,
+  MergePoliciesRequest,
+  MergePoliciesResponse,
+  CreatePolicyFromEventsRequest,
+  CreatePolicyFromEventsResponse,
+  ParseEventsRequest,
+  ParseHuntingRequest,
+  PolicyOptionsResponse,
+  ExplainPolicyRequest,
+  ExplainPolicyResponse,
+} from "./api";
