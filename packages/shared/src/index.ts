@@ -1,3 +1,3 @@
-export * from "./policy.js";
-export * from "./events.js";
-export * from "./api.js";
+export * from "./policy";
+export * from "./events";
+export * from "./api";

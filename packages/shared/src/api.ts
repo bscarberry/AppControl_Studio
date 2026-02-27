@@ -4,8 +4,8 @@
  * Shared between client and server for type-safe API communication.
  */
 
-import type { WdacPolicy, PolicyComparisonResult } from "./policy.js";
-import type { EventImportResult, ParsedCiEvent } from "./events.js";
+import type { WdacPolicy, PolicyComparisonResult } from "./policy";
+import type { EventImportResult, ParsedCiEvent } from "./events";
 
 // ---------------------------------------------------------------------------
 // Generic API response wrapper
