@@ -81,6 +81,7 @@
   .tag-green { @apply tag bg-accent-green-dim text-accent-green; }
   .tag-red { @apply tag bg-accent-red-dim text-accent-red; }
   .tag-yellow { @apply tag bg-accent-yellow-dim text-accent-yellow; }
+  .tag-orange { @apply tag bg-accent-orange-dim text-accent-orange; }
   .tag-blue { @apply tag bg-accent-blue-dim text-accent-blue; }
   .tag-gray { @apply tag bg-surface-3 text-text-secondary; }
 

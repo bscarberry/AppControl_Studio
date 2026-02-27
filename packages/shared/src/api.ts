@@ -132,6 +132,15 @@ export interface PolicyOptionsResponse {
   }>;
 }
 
+/** POST /api/policy/propose-rules — convert CI events into candidate WDAC rules */
+export interface ProposeRulesApiRequest {
+  events: ParsedCiEvent[];
+  preferSignerRules: boolean;
+  scopeSignerRules: boolean;
+  includePathRules: boolean;
+  includeDenyRules: boolean;
+}
+
 /** POST /api/policy/explain — returns human-readable explanation of a policy */
 export interface ExplainPolicyRequest {
   policy: WdacPolicy;

@@ -3,7 +3,7 @@
  */
 
 import { create } from "zustand";
-import type { WdacPolicy, ParsedCiEvent, PolicyComparisonResult } from "@appcontrol/shared";
+import type { WdacPolicy, ParsedCiEvent, PolicyComparisonResult, ProposedPolicyChanges } from "@appcontrol/shared";
 
 export interface PolicySession {
   id: string;
@@ -24,6 +24,9 @@ interface AppState {
   // Events import state
   importedEvents: ParsedCiEvent[];
 
+  // Rule engine proposals
+  proposedChanges: ProposedPolicyChanges | null;
+
   // Actions
   addSession: (session: PolicySession) => void;
   removeSession: (id: string) => void;
@@ -32,6 +35,7 @@ interface AppState {
   setComparison: (result: PolicyComparisonResult | null) => void;
   setImportedEvents: (events: ParsedCiEvent[]) => void;
   clearEvents: () => void;
+  setProposedChanges: (changes: ProposedPolicyChanges | null) => void;
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -39,6 +43,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   activePolicyId: null,
   comparison: null,
   importedEvents: [],
+  proposedChanges: null,
 
   addSession: (session) =>
     set((state) => {
@@ -67,6 +72,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   setImportedEvents: (events) => set({ importedEvents: events }),
 
   clearEvents: () => set({ importedEvents: [] }),
+
+  setProposedChanges: (changes) => set({ proposedChanges: changes }),
 }));
 
 // Selector helpers

@@ -37,6 +37,8 @@ export default {
           "red-dim": "#991b1b",
           yellow: "#eab308",
           "yellow-dim": "#854d0e",
+          orange: "#f97316",
+          "orange-dim": "#9a3412",
           purple: "#a855f7",
         },
       },

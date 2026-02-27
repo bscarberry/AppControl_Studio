@@ -6,6 +6,7 @@ import {
   Download,
   Upload,
   Activity,
+  Cpu,
   ChevronRight,
 } from "lucide-react";
 import clsx from "clsx";
@@ -42,6 +43,12 @@ const navItems: NavItem[] = [
     label: "Build Policy",
     icon: <Activity size={16} />,
     description: "Generate policy from events",
+  },
+  {
+    to: "/rule-engine",
+    label: "Rule Engine",
+    icon: <Cpu size={16} />,
+    description: "Events → candidate WDAC rules",
   },
   {
     to: "/export",

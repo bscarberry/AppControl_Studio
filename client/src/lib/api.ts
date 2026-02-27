@@ -10,6 +10,7 @@ import type {
   EventImportResult,
   ExplainPolicyResponse,
   CreatePolicyFromEventsResponse,
+  ProposeRulesResponse,
   WdacPolicy,
   ParsedCiEvent,
 } from "@appcontrol/shared";
@@ -68,6 +69,14 @@ export const policyApi = {
     get<{ options: Array<{ value: number; name: string; description: string; critical: boolean }> }>(
       "/policy/options"
     ),
+
+  proposeRules: (params: {
+    events: ParsedCiEvent[];
+    preferSignerRules: boolean;
+    scopeSignerRules: boolean;
+    includePathRules: boolean;
+    includeDenyRules: boolean;
+  }) => post<ProposeRulesResponse>("/policy/propose-rules", params),
 };
 
 // ---------------------------------------------------------------------------

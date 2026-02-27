@@ -51,6 +51,22 @@ export type {
   EventImportResult,
 } from "./events";
 
+// Type re-exports from rule-engine
+export type {
+  RuleConfidenceLevel,
+  RuleRiskLevel,
+  RuleEvaluationPhase,
+  ProposedRuleKind,
+  SafetyWarningSeverity,
+  SafetyWarningCode,
+  SafetyWarning,
+  WdacEvaluationInfo,
+  ProposedRule,
+  ProposedPolicyChanges,
+  ProposeRulesRequest,
+  ProposeRulesResponse,
+} from "./rule-engine";
+
 // Type re-exports from api
 export type {
   ApiSuccess,
@@ -71,4 +87,5 @@ export type {
   PolicyOptionsResponse,
   ExplainPolicyRequest,
   ExplainPolicyResponse,
+  ProposeRulesApiRequest,
 } from "./api";

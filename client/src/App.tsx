@@ -5,6 +5,7 @@ import { ComparePage } from "./pages/ComparePage.tsx";
 import { ImportEventsPage } from "./pages/ImportEventsPage.tsx";
 import { BuildPolicyPage } from "./pages/BuildPolicyPage.tsx";
 import { ExportPage } from "./pages/ExportPage.tsx";
+import { RuleEnginePage } from "./pages/RuleEnginePage.tsx";
 
 export default function App() {
   return (
@@ -18,6 +19,7 @@ export default function App() {
             <Route path="/import-events" element={<ImportEventsPage />} />
             <Route path="/build" element={<BuildPolicyPage />} />
             <Route path="/export" element={<ExportPage />} />
+            <Route path="/rule-engine" element={<RuleEnginePage />} />
           </Routes>
         </main>
       </div>

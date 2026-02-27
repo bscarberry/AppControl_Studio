@@ -5,7 +5,9 @@ import { generateWdacXml } from "../services/xml-generator.js";
 import { comparePolicies } from "../services/policy-comparator.js";
 import { explainPolicy } from "../services/policy-explainer.js";
 import { buildPolicyFromEvents } from "../services/policy-builder.js";
+import { proposeRules } from "../services/rule-engine.js";
 import { POLICY_RULE_OPTIONS } from "@appcontrol/shared";
+import type { ParsedCiEvent } from "@appcontrol/shared";
 
 export const policyRouter = Router();
 
@@ -141,6 +143,38 @@ policyRouter.post("/from-events", (req: Request, res: Response) => {
     res.status(422).json({
       ok: false,
       error: { code: "BUILD_ERROR", message: (err as Error).message },
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Rule generation engine: CI events → candidate WDAC rules
+// ---------------------------------------------------------------------------
+policyRouter.post("/propose-rules", (req: Request, res: Response) => {
+  const schema = z.object({
+    events: z.array(z.unknown()),
+    preferSignerRules: z.boolean().default(true),
+    scopeSignerRules: z.boolean().default(true),
+    includePathRules: z.boolean().default(false),
+    includeDenyRules: z.boolean().default(false),
+  });
+
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ ok: false, error: { code: "VALIDATION", message: parsed.error.message } });
+    return;
+  }
+
+  try {
+    const changes = proposeRules({
+      ...parsed.data,
+      events: parsed.data.events as ParsedCiEvent[],
+    });
+    res.json({ ok: true, data: { changes } });
+  } catch (err) {
+    res.status(422).json({
+      ok: false,
+      error: { code: "RULE_ENGINE_ERROR", message: (err as Error).message },
     });
   }
 });
