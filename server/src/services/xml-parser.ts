@@ -282,9 +282,10 @@ function parseFileRules(
     };
     if (type === "FileAttrib") rule.isFileAttrib = true;
     // Remove undefined keys for cleaner objects
-    Object.keys(rule).forEach((k) => {
-      if (rule[k as keyof WdacFileRule] === undefined) {
-        delete (rule as Record<string, unknown>)[k];
+    const ruleAsRecord = rule as unknown as Record<string, unknown>;
+    Object.keys(ruleAsRecord).forEach((k) => {
+      if (ruleAsRecord[k] === undefined) {
+        delete ruleAsRecord[k];
       }
     });
     if (!id) {

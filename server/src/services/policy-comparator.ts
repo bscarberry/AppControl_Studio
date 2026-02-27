@@ -267,7 +267,7 @@ function compareScenarios(left: WdacPolicy, right: WdacPolicy): ScenarioDiff[] {
 // Utilities
 // ---------------------------------------------------------------------------
 
-function findChangedFields(l: Record<string, unknown>, r: Record<string, unknown>, fields: string[]): string[] {
+function findChangedFields<T extends object>(l: T, r: T, fields: string[]): string[] {
   return fields.filter((f) => {
     const lv = (l as Record<string, unknown>)[f];
     const rv = (r as Record<string, unknown>)[f];
