@@ -9,36 +9,61 @@ interface FileRulesTableProps {
   onDelete?: (id: string) => void;
 }
 
-const RULE_TYPE_COLORS: Record<string, string> = {
+type EffectFilter = "all" | "Allow" | "Deny" | "FileAttrib";
+
+const EFFECT_COLORS: Record<string, string> = {
   Allow: "tag-green",
   Deny: "tag-red",
   FileAttrib: "tag-gray",
 };
 
-function getRuleKind(rule: WdacFileRule): { icon: React.ReactNode; label: string } {
-  if (rule.hash) return { icon: <Hash size={12} />, label: "Hash" };
-  if (rule.filePath) return { icon: <FolderOpen size={12} />, label: "Path" };
-  if (rule.packageFamilyName) return { icon: <Package size={12} />, label: "Package" };
-  if (rule.fileName || rule.productName || rule.internalName)
-    return { icon: <Tag size={12} />, label: "Attributes" };
-  return { icon: null, label: "Unknown" };
+function getRuleIcon(rule: WdacFileRule): { icon: React.ReactNode; label: string } {
+  switch (rule.kind) {
+    case "hash":       return { icon: <Hash size={12} />, label: "Hash" };
+    case "path":       return { icon: <FolderOpen size={12} />, label: "Path" };
+    case "package":    return { icon: <Package size={12} />, label: "Package" };
+    case "attribute":  return { icon: <Tag size={12} />, label: "Attributes" };
+    case "fileAttrib": return { icon: <Tag size={12} />, label: "FileAttrib" };
+  }
+}
+
+function getRuleEffectLabel(rule: WdacFileRule): string {
+  return rule.kind === "fileAttrib" ? "FileAttrib" : rule.effect;
+}
+
+function getRuleValue(rule: WdacFileRule): string {
+  switch (rule.kind) {
+    case "hash":       return `${rule.hash.substring(0, 16)}…`;
+    case "path":       return rule.filePath;
+    case "package":    return rule.packageFamilyName;
+    case "attribute":  return rule.fileName ?? rule.productName ?? rule.internalName ?? "—";
+    case "fileAttrib": return rule.fileName ?? rule.productName ?? rule.internalName ?? "—";
+  }
+}
+
+function matchesEffectFilter(rule: WdacFileRule, filter: EffectFilter): boolean {
+  if (filter === "all") return true;
+  if (filter === "FileAttrib") return rule.kind === "fileAttrib";
+  return rule.kind !== "fileAttrib" && rule.effect === filter;
+}
+
+function countByFilter(rules: WdacFileRule[], filter: EffectFilter): number {
+  return filter === "all" ? rules.length : rules.filter((r) => matchesEffectFilter(r, filter)).length;
 }
 
 export function FileRulesTable({ rules, editable, onDelete }: FileRulesTableProps) {
   const [filter, setFilter] = useState("");
-  const [typeFilter, setTypeFilter] = useState<"all" | "Allow" | "Deny" | "FileAttrib">("all");
+  const [effectFilter, setEffectFilter] = useState<EffectFilter>("all");
 
   const filtered = rules.filter((r) => {
-    if (typeFilter !== "all" && r.type !== typeFilter) return false;
+    if (!matchesEffectFilter(r, effectFilter)) return false;
     if (!filter) return true;
     const q = filter.toLowerCase();
+    const value = getRuleValue(r);
     return (
       r.id.toLowerCase().includes(q) ||
-      r.friendlyName?.toLowerCase().includes(q) ||
-      r.fileName?.toLowerCase().includes(q) ||
-      r.hash?.toLowerCase().includes(q) ||
-      r.filePath?.toLowerCase().includes(q) ||
-      r.productName?.toLowerCase().includes(q)
+      (r.friendlyName?.toLowerCase().includes(q) ?? false) ||
+      value.toLowerCase().includes(q)
     );
   });
 
@@ -56,20 +81,20 @@ export function FileRulesTable({ rules, editable, onDelete }: FileRulesTableProp
           />
         </div>
         <div className="flex gap-1">
-          {(["all", "Allow", "Deny", "FileAttrib"] as const).map((t) => (
+          {(["all", "Allow", "Deny", "FileAttrib"] as EffectFilter[]).map((t) => (
             <button
               key={t}
-              onClick={() => setTypeFilter(t)}
+              onClick={() => setEffectFilter(t)}
               className={clsx(
                 "px-2 py-1 text-xs rounded transition-colors",
-                typeFilter === t
+                effectFilter === t
                   ? "bg-surface-4 text-text-primary"
                   : "text-text-muted hover:text-text-secondary"
               )}
             >
               {t === "all" ? "All" : t}
               <span className="ml-1 text-text-muted">
-                ({t === "all" ? rules.length : rules.filter((r) => r.type === t).length})
+                ({countByFilter(rules, t)})
               </span>
             </button>
           ))}
@@ -84,7 +109,7 @@ export function FileRulesTable({ rules, editable, onDelete }: FileRulesTableProp
           <table className="data-table">
             <thead className="sticky top-0 bg-surface-1">
               <tr>
-                <th>Type</th>
+                <th>Effect</th>
                 <th>Kind</th>
                 <th>ID</th>
                 <th>Friendly Name</th>
@@ -94,27 +119,19 @@ export function FileRulesTable({ rules, editable, onDelete }: FileRulesTableProp
             </thead>
             <tbody>
               {filtered.map((rule) => {
-                const kind = getRuleKind(rule);
-                const value =
-                  rule.hash
-                    ? `${rule.hash.substring(0, 16)}…`
-                    : rule.filePath
-                    ? rule.filePath
-                    : rule.fileName
-                    ? rule.fileName
-                    : rule.packageFamilyName
-                    ? rule.packageFamilyName
-                    : rule.productName ?? "—";
+                const { icon, label } = getRuleIcon(rule);
+                const effectLabel = getRuleEffectLabel(rule);
+                const value = getRuleValue(rule);
 
                 return (
                   <tr key={rule.id}>
                     <td>
-                      <span className={RULE_TYPE_COLORS[rule.type]}>{rule.type}</span>
+                      <span className={EFFECT_COLORS[effectLabel]}>{effectLabel}</span>
                     </td>
                     <td>
                       <span className="flex items-center gap-1 text-text-muted text-xs">
-                        {kind.icon}
-                        {kind.label}
+                        {icon}
+                        {label}
                       </span>
                     </td>
                     <td className="mono text-xs text-text-muted">{rule.id}</td>

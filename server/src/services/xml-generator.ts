@@ -16,6 +16,11 @@ import type {
   WdacSigningScenario,
   WdacEku,
   PolicyRuleOption,
+  WdacHashRule,
+  WdacPathRule,
+  WdacPackageRule,
+  WdacAttributeRule,
+  WdacFileAttrib,
 } from "@appcontrol/shared";
 import { POLICY_RULE_OPTIONS } from "@appcontrol/shared";
 
@@ -155,27 +160,73 @@ function generateEkus(ekus: WdacEku[]): string[] {
 }
 
 function generateFileRules(fileRules: WdacFileRule[]): string[] {
-  const lines: string[] = [];
-  for (const rule of fileRules) {
-    const tag = rule.type === "FileAttrib" ? "FileAttrib" : rule.type; // Allow | Deny | FileAttrib
-    const attrs: string[] = [`ID="${escapeXml(rule.id)}"`];
+  return fileRules.map(serializeFileRule);
+}
 
-    if (rule.friendlyName) attrs.push(`FriendlyName="${escapeXml(rule.friendlyName)}"`);
-    if (rule.fileName) attrs.push(`FileName="${escapeXml(rule.fileName)}"`);
-    if (rule.internalName) attrs.push(`InternalName="${escapeXml(rule.internalName)}"`);
-    if (rule.fileDescription) attrs.push(`FileDescription="${escapeXml(rule.fileDescription)}"`);
-    if (rule.productName) attrs.push(`ProductName="${escapeXml(rule.productName)}"`);
-    if (rule.minimumFileVersion) attrs.push(`MinimumFileVersion="${escapeXml(rule.minimumFileVersion)}"`);
-    if (rule.maximumFileVersion) attrs.push(`MaximumFileVersion="${escapeXml(rule.maximumFileVersion)}"`);
-    if (rule.hash) attrs.push(`Hash="${escapeXml(rule.hash)}"`);
-    if (rule.hashType) attrs.push(`HashType="${escapeXml(rule.hashType)}"`);
-    if (rule.filePath) attrs.push(`FilePath="${escapeXml(rule.filePath)}"`);
-    if (rule.packageFamilyName) attrs.push(`PackageFamilyName="${escapeXml(rule.packageFamilyName)}"`);
-    if (rule.packageVersion) attrs.push(`PackageVersion="${escapeXml(rule.packageVersion)}"`);
-
-    lines.push(`${indent(2)}<${tag} ${attrs.join(" ")} />`);
+function serializeFileRule(rule: WdacFileRule): string {
+  const I = indent(2);
+  switch (rule.kind) {
+    case "hash": {
+      const r = rule as WdacHashRule;
+      const attrs = [
+        `ID="${escapeXml(r.id)}"`,
+        ...(r.friendlyName ? [`FriendlyName="${escapeXml(r.friendlyName)}"`] : []),
+        ...(r.fileName ? [`FileName="${escapeXml(r.fileName)}"`] : []),
+        `Hash="${escapeXml(r.hash)}"`,
+        `HashType="${escapeXml(r.hashType)}"`,
+      ];
+      return `${I}<${r.effect} ${attrs.join(" ")} />`;
+    }
+    case "path": {
+      const r = rule as WdacPathRule;
+      const attrs = [
+        `ID="${escapeXml(r.id)}"`,
+        ...(r.friendlyName ? [`FriendlyName="${escapeXml(r.friendlyName)}"`] : []),
+        `FilePath="${escapeXml(r.filePath)}"`,
+        ...(r.minimumFileVersion ? [`MinimumFileVersion="${escapeXml(r.minimumFileVersion)}"`] : []),
+        ...(r.maximumFileVersion ? [`MaximumFileVersion="${escapeXml(r.maximumFileVersion)}"`] : []),
+      ];
+      return `${I}<${r.effect} ${attrs.join(" ")} />`;
+    }
+    case "package": {
+      const r = rule as WdacPackageRule;
+      const attrs = [
+        `ID="${escapeXml(r.id)}"`,
+        ...(r.friendlyName ? [`FriendlyName="${escapeXml(r.friendlyName)}"`] : []),
+        `PackageFamilyName="${escapeXml(r.packageFamilyName)}"`,
+        ...(r.packageVersion ? [`PackageVersion="${escapeXml(r.packageVersion)}"`] : []),
+      ];
+      return `${I}<${r.effect} ${attrs.join(" ")} />`;
+    }
+    case "attribute": {
+      const r = rule as WdacAttributeRule;
+      const attrs = [
+        `ID="${escapeXml(r.id)}"`,
+        ...(r.friendlyName ? [`FriendlyName="${escapeXml(r.friendlyName)}"`] : []),
+        ...(r.fileName ? [`FileName="${escapeXml(r.fileName)}"`] : []),
+        ...(r.internalName ? [`InternalName="${escapeXml(r.internalName)}"`] : []),
+        ...(r.fileDescription ? [`FileDescription="${escapeXml(r.fileDescription)}"`] : []),
+        ...(r.productName ? [`ProductName="${escapeXml(r.productName)}"`] : []),
+        ...(r.minimumFileVersion ? [`MinimumFileVersion="${escapeXml(r.minimumFileVersion)}"`] : []),
+        ...(r.maximumFileVersion ? [`MaximumFileVersion="${escapeXml(r.maximumFileVersion)}"`] : []),
+      ];
+      return `${I}<${r.effect} ${attrs.join(" ")} />`;
+    }
+    case "fileAttrib": {
+      const r = rule as WdacFileAttrib;
+      const attrs = [
+        `ID="${escapeXml(r.id)}"`,
+        ...(r.friendlyName ? [`FriendlyName="${escapeXml(r.friendlyName)}"`] : []),
+        ...(r.fileName ? [`FileName="${escapeXml(r.fileName)}"`] : []),
+        ...(r.internalName ? [`InternalName="${escapeXml(r.internalName)}"`] : []),
+        ...(r.fileDescription ? [`FileDescription="${escapeXml(r.fileDescription)}"`] : []),
+        ...(r.productName ? [`ProductName="${escapeXml(r.productName)}"`] : []),
+        ...(r.minimumFileVersion ? [`MinimumFileVersion="${escapeXml(r.minimumFileVersion)}"`] : []),
+        ...(r.maximumFileVersion ? [`MaximumFileVersion="${escapeXml(r.maximumFileVersion)}"`] : []),
+      ];
+      return `${I}<FileAttrib ${attrs.join(" ")} />`;
+    }
   }
-  return lines;
 }
 
 function generateSigners(signers: WdacSignerRule[]): string[] {

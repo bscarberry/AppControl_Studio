@@ -51,10 +51,12 @@ describe("comparePolicies", () => {
       fileRules: [
         ...left.fileRules,
         {
+          kind: "hash" as const,
           id: "ID_ALLOW_NEW",
-          type: "Allow" as const,
+          effect: "Allow" as const,
           friendlyName: "New allow rule",
           hash: "AABBCC",
+          hashType: "SHA256" as const,
         },
       ],
     };

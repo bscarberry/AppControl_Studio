@@ -121,13 +121,15 @@ export function buildPolicyFromEvents(
       seenHashes.add(event.sha256Hash);
       const ruleId = `ID_ALLOW_${String(fileRules.length + 1).padStart(4, "0")}`;
       fileRules.push({
+        kind: "hash",
         id: ruleId,
-        type: "Allow",
+        effect: "Allow",
         friendlyName: event.fileName
           ? `Allow ${event.fileName} (Hash)`
           : `Allow Hash ${event.sha256Hash.substring(0, 16)}...`,
         hash: event.sha256Hash,
         hashType: "SHA256",
+        ...(event.fileName && { fileName: event.fileName }),
       });
       fileRuleIds.push(ruleId);
       log.push(`Added hash rule for: ${event.filePath}`);
@@ -140,8 +142,9 @@ export function buildPolicyFromEvents(
         seenPaths.add(event.filePath);
         const ruleId = `ID_ALLOW_PATH_${String(fileRules.length + 1).padStart(4, "0")}`;
         fileRules.push({
+          kind: "path",
           id: ruleId,
-          type: "Allow",
+          effect: "Allow",
           friendlyName: `Allow ${event.fileName ?? event.filePath} (Path)`,
           filePath: event.filePath,
         });

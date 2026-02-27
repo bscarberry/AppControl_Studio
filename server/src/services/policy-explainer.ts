@@ -160,8 +160,11 @@ export function explainPolicy(policy: WdacPolicy): ExplainPolicyResponse {
   summaryParts.push(
     `User mode: ${ruleBreakdown.userMode.allowedSignerCount} allowed signer(s), ${ruleBreakdown.userMode.fileRuleCount} direct file rule(s).`
   );
+  const effectRules = policy.fileRules.filter((r) => r.kind !== "fileAttrib");
+  const allowCount  = effectRules.filter((r) => (r as { effect: string }).effect === "Allow").length;
+  const denyCount   = effectRules.filter((r) => (r as { effect: string }).effect === "Deny").length;
   summaryParts.push(
-    `Total file rules: ${policy.fileRules.filter((r) => r.type !== "FileAttrib").length} (${policy.fileRules.filter((r) => r.type === "Allow").length} allow, ${policy.fileRules.filter((r) => r.type === "Deny").length} deny).`
+    `Total file rules: ${effectRules.length} (${allowCount} allow, ${denyCount} deny).`
   );
 
   return {

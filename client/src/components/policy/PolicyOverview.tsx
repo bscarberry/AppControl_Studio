@@ -107,8 +107,8 @@ export function PolicyOverview({ policy, explanation }: PolicyOverviewProps) {
           />
         </div>
         <div className="mt-3 grid grid-cols-3 gap-3 text-center">
-          <MiniStat label="Allow Rules" value={policy.fileRules.filter((r) => r.type === "Allow").length} color="green" />
-          <MiniStat label="Deny Rules" value={policy.fileRules.filter((r) => r.type === "Deny").length} color="red" />
+          <MiniStat label="Allow Rules" value={policy.fileRules.filter((r) => r.kind !== "fileAttrib" && r.effect === "Allow").length} color="green" />
+          <MiniStat label="Deny Rules" value={policy.fileRules.filter((r) => r.kind !== "fileAttrib" && r.effect === "Deny").length} color="red" />
           <MiniStat label="Signers" value={policy.signers.length} color="blue" />
         </div>
       </section>

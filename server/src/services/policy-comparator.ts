@@ -130,21 +130,9 @@ function compareOptions(left: WdacPolicy, right: WdacPolicy): OptionDiff[] {
 // ---------------------------------------------------------------------------
 
 function fileRuleFingerprint(rule: WdacFileRule): string {
-  // Canonical fingerprint for structural equivalence
-  return JSON.stringify({
-    type: rule.type,
-    hash: rule.hash,
-    hashType: rule.hashType,
-    fileName: rule.fileName,
-    internalName: rule.internalName,
-    fileDescription: rule.fileDescription,
-    productName: rule.productName,
-    minimumFileVersion: rule.minimumFileVersion,
-    maximumFileVersion: rule.maximumFileVersion,
-    filePath: rule.filePath,
-    packageFamilyName: rule.packageFamilyName,
-    packageVersion: rule.packageVersion,
-  });
+  // Canonical fingerprint for structural equivalence (excludes ID)
+  const { id: _id, ...content } = rule as Record<string, unknown>;
+  return JSON.stringify(content);
 }
 
 function compareFileRules(left: WdacPolicy, right: WdacPolicy): FileRuleDiff[] {
@@ -162,12 +150,7 @@ function compareFileRules(left: WdacPolicy, right: WdacPolicy): FileRuleDiff[] {
     } else if (!l && r) {
       diffs.push({ id, status: "added", right: r });
     } else if (l && r) {
-      const changedFields = findChangedFields(l, r, [
-        "type", "hash", "hashType", "fileName", "internalName",
-        "fileDescription", "productName", "minimumFileVersion",
-        "maximumFileVersion", "filePath", "packageFamilyName",
-        "packageVersion", "friendlyName",
-      ]);
+      const changedFields = findChangedFileRuleFields(l, r);
       const status = changedFields.length > 0 ? "changed" : "unchanged";
       diffs.push({ id, status, left: l, right: r, changedFields });
     }
@@ -266,6 +249,16 @@ function compareScenarios(left: WdacPolicy, right: WdacPolicy): ScenarioDiff[] {
 // ---------------------------------------------------------------------------
 // Utilities
 // ---------------------------------------------------------------------------
+
+function findChangedFileRuleFields(l: WdacFileRule, r: WdacFileRule): string[] {
+  // A kind change means the entire structure changed
+  if (l.kind !== r.kind) return ["kind"];
+  const lRec = l as unknown as Record<string, unknown>;
+  const rRec = r as unknown as Record<string, unknown>;
+  const allKeys = new Set([...Object.keys(lRec), ...Object.keys(rRec)]);
+  allKeys.delete("id");
+  return [...allKeys].filter((k) => JSON.stringify(lRec[k]) !== JSON.stringify(rRec[k]));
+}
 
 function findChangedFields<T extends object>(l: T, r: T, fields: string[]): string[] {
   return fields.filter((f) => {

@@ -45,8 +45,11 @@ describe("XML round-trip", () => {
     for (const origRule of original.fileRules) {
       const rtRule = roundtripped.fileRules.find((r) => r.id === origRule.id);
       expect(rtRule).toBeDefined();
-      expect(rtRule?.type).toBe(origRule.type);
-      expect(rtRule?.hash).toBe(origRule.hash);
+      expect(rtRule?.kind).toBe(origRule.kind);
+      // For hash rules, verify the hash is preserved
+      if (origRule.kind === "hash" && rtRule?.kind === "hash") {
+        expect(rtRule.hash).toBe(origRule.hash);
+      }
     }
   });
 

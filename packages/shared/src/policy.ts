@@ -68,39 +68,100 @@ export interface WdacEku {
 }
 
 // ---------------------------------------------------------------------------
-// File Rules
+// File Rules — discriminated union
+//
+// Four concrete kinds emitted from XML parsing:
+//   hash      → <Allow Hash="..."> / <Deny Hash="...">
+//   path      → <Allow FilePath="..."> / <Deny FilePath="...">
+//   package   → <Allow PackageFamilyName="..."> / <Deny PackageFamilyName="...">
+//   attribute → <Allow FileName="..." ...> with no hash/path/package; also Deny
+//   fileAttrib → <FileAttrib ...> — signer-scoping descriptor, no Allow/Deny effect
 // ---------------------------------------------------------------------------
-
-export type FileRuleType = "Allow" | "Deny" | "FileAttrib";
 
 export type HashType = "SHA256" | "SHA1" | "SHA256Flat" | "SHA1Page";
 
-export interface WdacFileRule {
+/** Effect of an Allow/Deny file rule. WdacFileAttrib descriptors carry no effect. */
+export type FileRuleEffect = "Allow" | "Deny";
+
+/** Discriminant field present on all WdacFileRule variants. */
+export type FileRuleKind = "hash" | "path" | "package" | "attribute" | "fileAttrib";
+
+/** Matches a file by cryptographic hash. */
+export interface WdacHashRule {
+  kind: "hash";
   id: string;
-  type: FileRuleType;
+  effect: FileRuleEffect;
   friendlyName?: string;
+  hash: string;
+  hashType: HashType;
+  /** Original filename embedded in the rule for informational display only. */
+  fileName?: string;
+}
 
-  // Hash-based attributes
-  hash?: string;
-  hashType?: HashType;
+/** Matches a file by filesystem path. May contain WDAC macros (%WINDIR%, %OSDRIVE%, etc.). */
+export interface WdacPathRule {
+  kind: "path";
+  id: string;
+  effect: FileRuleEffect;
+  friendlyName?: string;
+  filePath: string;
+  minimumFileVersion?: string;
+  maximumFileVersion?: string;
+}
 
-  // File metadata attributes
+/** Matches a packaged (UWP/MSIX) app by family name and optional version. */
+export interface WdacPackageRule {
+  kind: "package";
+  id: string;
+  effect: FileRuleEffect;
+  friendlyName?: string;
+  packageFamilyName: string;
+  packageVersion?: string;
+}
+
+/**
+ * An Allow/Deny rule that matches by file metadata attributes only
+ * (no hash, path, or package family name). Less common than the other kinds.
+ */
+export interface WdacAttributeRule {
+  kind: "attribute";
+  id: string;
+  effect: FileRuleEffect;
+  friendlyName?: string;
   fileName?: string;
   internalName?: string;
   fileDescription?: string;
   productName?: string;
   minimumFileVersion?: string;
   maximumFileVersion?: string;
+}
 
-  // Path-based
-  filePath?: string;
+/**
+ * A <FileAttrib> signer-scoping descriptor. Not an independent Allow/Deny rule —
+ * only enforced when referenced from a WdacSignerRule via fileAttribRefs.
+ */
+export interface WdacFileAttrib {
+  kind: "fileAttrib";
+  id: string;
+  friendlyName?: string;
+  fileName?: string;
+  internalName?: string;
+  fileDescription?: string;
+  productName?: string;
+  minimumFileVersion?: string;
+  maximumFileVersion?: string;
+}
 
-  // Packaged apps
-  packageFamilyName?: string;
-  packageVersion?: string;
+export type WdacFileRule =
+  | WdacHashRule
+  | WdacPathRule
+  | WdacPackageRule
+  | WdacAttributeRule
+  | WdacFileAttrib;
 
-  // FileAttrib is referenced by signers; not directly enforced
-  isFileAttrib?: boolean;
+/** Type guard: narrows to the four variants that carry an Allow/Deny effect. */
+export function isEffectRule(r: WdacFileRule): r is Exclude<WdacFileRule, WdacFileAttrib> {
+  return r.kind !== "fileAttrib";
 }
 
 // ---------------------------------------------------------------------------
@@ -170,8 +231,10 @@ export interface WdacPolicy {
   basePolicyId?: string;
   /** Identifies the type variant of the policy */
   policyTypeId?: string;
-  /** Human-readable name */
+  /** Human-readable name — from FriendlyName attr/element or <Settings> Name */
   friendlyName?: string;
+  /** Policy identifier from <Settings Provider="PolicyInfo" Key="Information" ValueName="Id"> */
+  settingsId?: string;
   /** Policy version string, e.g. "10.0.0.0" */
   versionEx: string;
   /** Platform restriction GUID */
@@ -194,6 +257,49 @@ export interface WdacPolicy {
 
   /** Parsed from file — source filename for display */
   sourceFileName?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Parse Diagnostics
+// ---------------------------------------------------------------------------
+
+export type DiagnosticSeverity = "error" | "warning" | "info";
+
+export interface ParseDiagnostic {
+  severity: DiagnosticSeverity;
+  /** Machine-readable code for filtering and UI display */
+  code: string;
+  message: string;
+  /** The XML element or field that triggered this diagnostic */
+  context?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Rule Collection Index
+//
+// Built after parsing to enable O(1) cross-reference lookups.
+// Returned alongside the parsed policy in ParseResult.
+// ---------------------------------------------------------------------------
+
+export interface RuleCollectionIndex {
+  /** All file rules keyed by their ID attribute */
+  fileRulesById: Map<string, WdacFileRule>;
+  /** All signer rules keyed by their ID attribute */
+  signersById: Map<string, WdacSignerRule>;
+  /** All EKUs keyed by their ID attribute */
+  ekusById: Map<string, WdacEku>;
+
+  /** Signing scenario value → set of signer IDs referenced in that scenario */
+  signerIdsByScenario: Map<SigningScenarioValue, Set<string>>;
+  /** Signing scenario value → set of directly-referenced file rule IDs */
+  fileRuleIdsByScenario: Map<SigningScenarioValue, Set<string>>;
+  /** Signer ID → resolved WdacFileAttrib descriptors scoping that signer */
+  fileAttribsBySignerId: Map<string, WdacFileAttrib[]>;
+
+  /** AllowedSigner/DeniedSigner refs that pointed to a non-existent signer */
+  unresolvedSignerRefs: Array<{ signerRef: string; inScenario: SigningScenarioValue }>;
+  /** FileRuleRef or FileAttribRef entries that pointed to a non-existent rule */
+  unresolvedFileRuleRefs: Array<{ ruleRef: string; context: string }>;
 }
 
 // ---------------------------------------------------------------------------

@@ -1,7 +1,8 @@
 /**
  * WDAC XML Parser
  *
- * Converts a WDAC SiPolicy XML document into a normalized WdacPolicy object.
+ * Converts a WDAC SiPolicy XML document into a normalized WdacPolicy object
+ * plus a RuleCollectionIndex for O(1) cross-reference lookups.
  *
  * The WDAC schema is defined in cipolicy.xsd (Windows SDK).
  * This parser follows the documented structure at:
@@ -12,6 +13,11 @@ import { XMLParser } from "fast-xml-parser";
 import type {
   WdacPolicy,
   WdacFileRule,
+  WdacHashRule,
+  WdacPathRule,
+  WdacPackageRule,
+  WdacAttributeRule,
+  WdacFileAttrib,
   WdacSignerRule,
   WdacSigningScenario,
   WdacEku,
@@ -20,9 +26,11 @@ import type {
   AllowedSigner,
   DeniedSigner,
   SigningScenarioValue,
-  FileRuleType,
+  FileRuleEffect,
   HashType,
   CertRootType,
+  ParseDiagnostic,
+  RuleCollectionIndex,
 } from "@appcontrol/shared";
 
 // ---------------------------------------------------------------------------
@@ -52,16 +60,33 @@ function normalizeGuid(value: string | undefined): string | undefined {
 }
 
 // ---------------------------------------------------------------------------
+// Diagnostic factories
+// ---------------------------------------------------------------------------
+
+function diagError(code: string, message: string, context?: string): ParseDiagnostic {
+  return { severity: "error", code, message, context };
+}
+
+function diagWarn(code: string, message: string, context?: string): ParseDiagnostic {
+  return { severity: "warning", code, message, context };
+}
+
+function diagInfo(code: string, message: string, context?: string): ParseDiagnostic {
+  return { severity: "info", code, message, context };
+}
+
+// ---------------------------------------------------------------------------
 // Main Parser
 // ---------------------------------------------------------------------------
 
 export interface ParseResult {
   policy: WdacPolicy;
-  warnings: string[];
+  index: RuleCollectionIndex;
+  diagnostics: ParseDiagnostic[];
 }
 
 export function parseWdacXml(xmlContent: string, fileName?: string): ParseResult {
-  const warnings: string[] = [];
+  const diagnostics: ParseDiagnostic[] = [];
 
   const parser = new XMLParser({
     ignoreAttributes: false,
@@ -102,28 +127,37 @@ export function parseWdacXml(xmlContent: string, fileName?: string): ParseResult
   const friendlyName =
     attr(root, "FriendlyName") ??
     attr(root, "friendlyName") ??
-    parseSettingsName(root);
+    parseSettingsField(root, "Name");
+  const settingsId = parseSettingsField(root, "Id");
   const versionEx = attr(root, "VersionEx") ?? attr(root, "versionEx") ?? "10.0.0.0";
   const platformId = normalizeGuid(attr(root, "PlatformID") ?? attr(root, "platformId"));
   const hvciRaw = attr(root, "HvciOptions") ?? attr(root, "hvciOptions");
   const hvciOptions = hvciRaw !== undefined ? parseInt(hvciRaw, 10) : undefined;
 
+  if (!policyId) {
+    diagnostics.push(diagError("MISSING_POLICY_ID", "PolicyID attribute or element is missing or unparseable."));
+  }
+  if (friendlyName && parseSettingsField(root, "Name")) {
+    diagnostics.push(diagInfo("SETTINGS_NAME_FALLBACK",
+      "Policy name was read from <Settings> block, not FriendlyName attribute."));
+  }
+
   const policyType = basePolicyId ? "Supplemental" : "Base";
 
   // --- Policy Rule Options ---
-  const options = parsePolicyRuleOptions(root, warnings);
+  const options = parsePolicyRuleOptions(root, diagnostics);
 
   // --- EKUs ---
-  const ekus = parseEkus(root, warnings);
+  const ekus = parseEkus(root, diagnostics);
 
   // --- File Rules ---
-  const fileRules = parseFileRules(root, warnings);
+  const fileRules = parseFileRules(root, diagnostics);
 
   // --- Signers ---
-  const signers = parseSigners(root, warnings);
+  const signers = parseSigners(root, diagnostics);
 
   // --- Signing Scenarios ---
-  const signingScenarios = parseSigningScenarios(root, warnings);
+  const signingScenarios = parseSigningScenarios(root, diagnostics);
 
   // --- Update Policy Signers ---
   const updatePolicySigners = parseUpdatePolicySigners(root);
@@ -136,6 +170,7 @@ export function parseWdacXml(xmlContent: string, fileName?: string): ParseResult
     basePolicyId,
     policyTypeId,
     friendlyName,
+    settingsId,
     versionEx,
     platformId,
     policyType,
@@ -150,7 +185,9 @@ export function parseWdacXml(xmlContent: string, fileName?: string): ParseResult
     sourceFileName: fileName,
   };
 
-  return { policy, warnings };
+  const index = buildIndex(policy, diagnostics);
+
+  return { policy, index, diagnostics };
 }
 
 // ---------------------------------------------------------------------------
@@ -159,7 +196,7 @@ export function parseWdacXml(xmlContent: string, fileName?: string): ParseResult
 
 function parsePolicyRuleOptions(
   root: Record<string, unknown>,
-  warnings: string[]
+  diagnostics: ParseDiagnostic[]
 ): PolicyRuleOption[] {
   const options: PolicyRuleOption[] = [];
   const rulesSection = root["Rules"] as Record<string, unknown> | undefined;
@@ -170,7 +207,7 @@ function parsePolicyRuleOptions(
     const ruleObj = rule as Record<string, unknown>;
     const option = ruleObj["Option"] as Record<string, unknown> | string | undefined;
     if (!option) {
-      warnings.push("Found <Rule> without <Option> child; skipping.");
+      diagnostics.push(diagWarn("MISSING_RULE_OPTION", "Found <Rule> without <Option> child; skipping."));
       continue;
     }
 
@@ -186,15 +223,16 @@ function parsePolicyRuleOptions(
     // Parse "Enabled:Boot Menu Protection" -> value 1 or "Disabled:Script Enforcement" -> value 11
     const match = optionText.trim().match(/^(Enabled|Disabled|Required|Allowed|Invalidated):(.+)$/);
     if (!match) {
-      warnings.push(`Unrecognized Option format: '${optionText}'; skipping.`);
+      diagnostics.push(diagWarn("UNRECOGNIZED_OPTION_FORMAT",
+        `Unrecognized Option format: '${optionText}'; skipping.`));
       continue;
     }
 
-    // Map option name to number by reverse-looking in POLICY_RULE_OPTIONS
     const optionName = `${match[1]}:${match[2]}`;
     const optionNumber = findOptionNumber(optionName);
     if (optionNumber === undefined) {
-      warnings.push(`Unknown policy rule option '${optionText}'; recording as raw value.`);
+      diagnostics.push(diagWarn("UNKNOWN_RULE_OPTION",
+        `Unknown policy rule option '${optionText}'; skipping.`));
       continue;
     }
 
@@ -239,7 +277,7 @@ function findOptionNumber(name: string): number | undefined {
 
 function parseEkus(
   root: Record<string, unknown>,
-  _warnings: string[]
+  _diagnostics: ParseDiagnostic[]
 ): WdacEku[] {
   const ekus: WdacEku[] = [];
   const ekusSection = root["EKUs"] as Record<string, unknown> | undefined;
@@ -257,57 +295,118 @@ function parseEkus(
   return ekus;
 }
 
+// ---------------------------------------------------------------------------
+// File rule parsing — discriminated union
+// ---------------------------------------------------------------------------
+
 function parseFileRules(
   root: Record<string, unknown>,
-  warnings: string[]
+  diagnostics: ParseDiagnostic[]
 ): WdacFileRule[] {
   const rules: WdacFileRule[] = [];
   const fileRulesSection = root["FileRules"] as Record<string, unknown> | undefined;
   if (!fileRulesSection) return rules;
 
-  const parseRule = (ruleRaw: unknown, type: FileRuleType) => {
-    const r = ruleRaw as Record<string, unknown>;
-    const id = attr(r, "ID") ?? attr(r, "Id") ?? "";
-    const rule: WdacFileRule = {
-      id,
-      type,
-      friendlyName: attr(r, "FriendlyName"),
-      fileName: attr(r, "FileName"),
-      internalName: attr(r, "InternalName"),
-      fileDescription: attr(r, "FileDescription"),
-      productName: attr(r, "ProductName"),
-      minimumFileVersion: attr(r, "MinimumFileVersion"),
-      maximumFileVersion: attr(r, "MaximumFileVersion"),
-      filePath: attr(r, "FilePath"),
-      packageFamilyName: attr(r, "PackageFamilyName"),
-      packageVersion: attr(r, "PackageVersion"),
-      hash: attr(r, "Hash"),
-      hashType: attr(r, "HashType") as HashType | undefined,
-    };
-    if (type === "FileAttrib") rule.isFileAttrib = true;
-    // Remove undefined keys for cleaner objects
-    const ruleAsRecord = rule as unknown as Record<string, unknown>;
-    Object.keys(ruleAsRecord).forEach((k) => {
-      if (ruleAsRecord[k] === undefined) {
-        delete ruleAsRecord[k];
-      }
-    });
-    if (!id) {
-      warnings.push(`${type} rule missing ID attribute; rule will have empty ID.`);
-    }
-    rules.push(rule);
-  };
-
-  asArray(fileRulesSection["Allow"]).forEach((r) => parseRule(r, "Allow"));
-  asArray(fileRulesSection["Deny"]).forEach((r) => parseRule(r, "Deny"));
-  asArray(fileRulesSection["FileAttrib"]).forEach((r) => parseRule(r, "FileAttrib"));
+  asArray(fileRulesSection["Allow"]).forEach((r) =>
+    rules.push(classifyEffectRule(r as Record<string, unknown>, "Allow", diagnostics))
+  );
+  asArray(fileRulesSection["Deny"]).forEach((r) =>
+    rules.push(classifyEffectRule(r as Record<string, unknown>, "Deny", diagnostics))
+  );
+  asArray(fileRulesSection["FileAttrib"]).forEach((r) =>
+    rules.push(buildFileAttrib(r as Record<string, unknown>, diagnostics))
+  );
 
   return rules;
 }
 
+/**
+ * Classifies an <Allow> or <Deny> element into the most specific rule kind
+ * based on which discriminating fields are present.
+ * Priority: hash > path > package > attribute (catch-all)
+ */
+function classifyEffectRule(
+  r: Record<string, unknown>,
+  effect: FileRuleEffect,
+  diagnostics: ParseDiagnostic[]
+): Exclude<WdacFileRule, WdacFileAttrib> {
+  const id = attr(r, "ID") ?? attr(r, "Id") ?? "";
+  const friendlyName = attr(r, "FriendlyName") ?? undefined;
+
+  if (!id) {
+    diagnostics.push(diagWarn("MISSING_FILE_RULE_ID",
+      `${effect} rule is missing an ID attribute.`));
+  }
+
+  const hash = attr(r, "Hash");
+  if (hash) {
+    const hashType = (attr(r, "HashType") ?? "SHA256") as HashType;
+    const rule: WdacHashRule = { kind: "hash", id, effect, hash, hashType };
+    if (friendlyName) rule.friendlyName = friendlyName;
+    const fileName = attr(r, "FileName");
+    if (fileName) rule.fileName = fileName;
+    return rule;
+  }
+
+  const filePath = attr(r, "FilePath");
+  if (filePath) {
+    const rule: WdacPathRule = { kind: "path", id, effect, filePath };
+    if (friendlyName) rule.friendlyName = friendlyName;
+    const minVer = attr(r, "MinimumFileVersion");
+    const maxVer = attr(r, "MaximumFileVersion");
+    if (minVer) rule.minimumFileVersion = minVer;
+    if (maxVer) rule.maximumFileVersion = maxVer;
+    return rule;
+  }
+
+  const packageFamilyName = attr(r, "PackageFamilyName");
+  if (packageFamilyName) {
+    const rule: WdacPackageRule = { kind: "package", id, effect, packageFamilyName };
+    if (friendlyName) rule.friendlyName = friendlyName;
+    const pkgVer = attr(r, "PackageVersion");
+    if (pkgVer) rule.packageVersion = pkgVer;
+    return rule;
+  }
+
+  // Catch-all: file attribute matching rule (no hash, path, or package)
+  diagnostics.push(diagInfo("AMBIGUOUS_FILE_RULE",
+    `Rule '${id}' has no Hash, FilePath, or PackageFamilyName — classified as 'attribute' kind.`,
+    `${effect}[${id}]`));
+
+  const rule: WdacAttributeRule = { kind: "attribute", id, effect };
+  if (friendlyName) rule.friendlyName = friendlyName;
+  const fn = attr(r, "FileName");      if (fn)  rule.fileName = fn;
+  const inm = attr(r, "InternalName"); if (inm) rule.internalName = inm;
+  const fd = attr(r, "FileDescription"); if (fd) rule.fileDescription = fd;
+  const pn = attr(r, "ProductName");   if (pn)  rule.productName = pn;
+  const minV = attr(r, "MinimumFileVersion"); if (minV) rule.minimumFileVersion = minV;
+  const maxV = attr(r, "MaximumFileVersion"); if (maxV) rule.maximumFileVersion = maxV;
+  return rule;
+}
+
+/** Builds a WdacFileAttrib from a <FileAttrib> element. */
+function buildFileAttrib(
+  r: Record<string, unknown>,
+  diagnostics: ParseDiagnostic[]
+): WdacFileAttrib {
+  const id = attr(r, "ID") ?? attr(r, "Id") ?? "";
+  if (!id) {
+    diagnostics.push(diagWarn("MISSING_FILE_RULE_ID", "FileAttrib element is missing an ID attribute."));
+  }
+  const rule: WdacFileAttrib = { kind: "fileAttrib", id };
+  const fn = attr(r, "FriendlyName"); if (fn)  rule.friendlyName = fn;
+  const f  = attr(r, "FileName");     if (f)   rule.fileName = f;
+  const inm = attr(r, "InternalName"); if (inm) rule.internalName = inm;
+  const fd = attr(r, "FileDescription"); if (fd) rule.fileDescription = fd;
+  const pn = attr(r, "ProductName");  if (pn)  rule.productName = pn;
+  const minV = attr(r, "MinimumFileVersion"); if (minV) rule.minimumFileVersion = minV;
+  const maxV = attr(r, "MaximumFileVersion"); if (maxV) rule.maximumFileVersion = maxV;
+  return rule;
+}
+
 function parseSigners(
   root: Record<string, unknown>,
-  warnings: string[]
+  diagnostics: ParseDiagnostic[]
 ): WdacSignerRule[] {
   const signers: WdacSignerRule[] = [];
   const signersSection = root["Signers"] as Record<string, unknown> | undefined;
@@ -354,7 +453,7 @@ function parseSigners(
       .map((r) => attr(r as Record<string, unknown>, "RuleID") ?? attr(r as Record<string, unknown>, "RuleId") ?? "")
       .filter(Boolean);
 
-    if (!id) warnings.push(`Signer '${name}' missing ID attribute.`);
+    if (!id) diagnostics.push(diagWarn("MISSING_SIGNER_ID", `Signer '${name}' is missing an ID attribute.`));
 
     signers.push({
       id,
@@ -373,7 +472,7 @@ function parseSigners(
 
 function parseSigningScenarios(
   root: Record<string, unknown>,
-  warnings: string[]
+  diagnostics: ParseDiagnostic[]
 ): WdacSigningScenario[] {
   const scenarios: WdacSigningScenario[] = [];
   const ssSection = root["SigningScenarios"] as Record<string, unknown> | undefined;
@@ -388,7 +487,8 @@ function parseSigningScenarios(
     const minHashVersion = attr(ssObj, "MinimumHashAlgorithm");
 
     if (value !== 131 && value !== 12) {
-      warnings.push(`Unexpected SigningScenario Value '${value}'; expected 131 (kernel) or 12 (user mode).`);
+      diagnostics.push(diagWarn("UNEXPECTED_SCENARIO_VALUE",
+        `Unexpected SigningScenario Value '${value}'; expected 131 (kernel) or 12 (user mode).`));
     }
 
     // ProductSigners > AllowedSigners > AllowedSigner[]
@@ -465,13 +565,12 @@ function parseUpdatePolicySigners(root: Record<string, unknown>): string[] {
 }
 
 /**
- * Extracts the policy name from the <Settings> block used by policies that
- * store identity via:
- *   <Setting Provider="PolicyInfo" Key="Information" ValueName="Name">
+ * Extracts a named field from the <Settings> block:
+ *   <Setting Provider="PolicyInfo" Key="Information" ValueName="{valueName}">
  *     <Value><String>...</String></Value>
  *   </Setting>
  */
-function parseSettingsName(root: Record<string, unknown>): string | undefined {
+function parseSettingsField(root: Record<string, unknown>, valueName: string): string | undefined {
   const settingsSection = root["Settings"] as Record<string, unknown> | undefined;
   if (!settingsSection) return undefined;
 
@@ -480,8 +579,8 @@ function parseSettingsName(root: Record<string, unknown>): string | undefined {
     const sObj = s as Record<string, unknown>;
     const provider = attr(sObj, "Provider");
     const key = attr(sObj, "Key");
-    const valueName = attr(sObj, "ValueName");
-    if (provider === "PolicyInfo" && key === "Information" && valueName === "Name") {
+    const vn = attr(sObj, "ValueName");
+    if (provider === "PolicyInfo" && key === "Information" && vn === valueName) {
       const valueEl = sObj["Value"] as Record<string, unknown> | undefined;
       if (valueEl) {
         const str = valueEl["String"];
@@ -498,4 +597,73 @@ function parseCiSigners(root: Record<string, unknown>): string[] {
   return asArray(section["CiSigner"])
     .map((c) => attr(c as Record<string, unknown>, "SignerId") ?? attr(c as Record<string, unknown>, "SignerID") ?? "")
     .filter(Boolean);
+}
+
+// ---------------------------------------------------------------------------
+// Rule Collection Index
+// ---------------------------------------------------------------------------
+
+function buildIndex(policy: WdacPolicy, diagnostics: ParseDiagnostic[]): RuleCollectionIndex {
+  const fileRulesById = new Map(policy.fileRules.map((r) => [r.id, r]));
+  const signersById   = new Map(policy.signers.map((s) => [s.id, s]));
+  const ekusById      = new Map(policy.ekus.map((e) => [e.id, e]));
+
+  const signerIdsByScenario   = new Map<SigningScenarioValue, Set<string>>();
+  const fileRuleIdsByScenario = new Map<SigningScenarioValue, Set<string>>();
+  const fileAttribsBySignerId = new Map<string, WdacFileAttrib[]>();
+  const unresolvedSignerRefs:   RuleCollectionIndex["unresolvedSignerRefs"]   = [];
+  const unresolvedFileRuleRefs: RuleCollectionIndex["unresolvedFileRuleRefs"] = [];
+
+  for (const scenario of policy.signingScenarios) {
+    const signerSet   = new Set<string>();
+    const fileRuleSet = new Set<string>();
+    signerIdsByScenario.set(scenario.value, signerSet);
+    fileRuleIdsByScenario.set(scenario.value, fileRuleSet);
+
+    for (const { signerId } of [...scenario.allowedSigners, ...scenario.deniedSigners]) {
+      if (!signersById.has(signerId)) {
+        unresolvedSignerRefs.push({ signerRef: signerId, inScenario: scenario.value });
+        diagnostics.push(diagWarn("UNRESOLVED_SIGNER_REF",
+          `Signer reference '${signerId}' in scenario ${scenario.value} has no matching <Signer>.`));
+      } else {
+        signerSet.add(signerId);
+      }
+    }
+
+    for (const refId of scenario.fileRuleRefs) {
+      if (!fileRulesById.has(refId)) {
+        unresolvedFileRuleRefs.push({ ruleRef: refId, context: `scenario ${scenario.value}` });
+        diagnostics.push(diagWarn("UNRESOLVED_FILE_RULE_REF",
+          `FileRuleRef '${refId}' in scenario ${scenario.value} has no matching file rule.`));
+      } else {
+        fileRuleSet.add(refId);
+      }
+    }
+  }
+
+  for (const signer of policy.signers) {
+    const attribs: WdacFileAttrib[] = [];
+    for (const refId of signer.fileAttribRefs ?? []) {
+      const rule = fileRulesById.get(refId);
+      if (!rule || rule.kind !== "fileAttrib") {
+        unresolvedFileRuleRefs.push({ ruleRef: refId, context: `signer ${signer.id}` });
+        diagnostics.push(diagWarn("UNRESOLVED_FILE_ATTRIB_REF",
+          `Signer '${signer.name}' references FileAttrib '${refId}' which does not exist.`));
+      } else {
+        attribs.push(rule);
+      }
+    }
+    if (attribs.length > 0) fileAttribsBySignerId.set(signer.id, attribs);
+  }
+
+  return {
+    fileRulesById,
+    signersById,
+    ekusById,
+    signerIdsByScenario,
+    fileRuleIdsByScenario,
+    fileAttribsBySignerId,
+    unresolvedSignerRefs,
+    unresolvedFileRuleRefs,
+  };
 }

@@ -2,14 +2,23 @@
 export { POLICY_RULE_OPTIONS, SIGNING_SCENARIO } from "./policy";
 export { CI_EVENT_IDS } from "./events";
 
+// Runtime helper
+export { isEffectRule } from "./policy";
+
 // Type re-exports from policy
 export type {
   PolicyRuleOptionNumber,
   PolicyRuleOption,
   SigningScenarioValue,
   WdacEku,
-  FileRuleType,
   HashType,
+  FileRuleEffect,
+  FileRuleKind,
+  WdacHashRule,
+  WdacPathRule,
+  WdacPackageRule,
+  WdacAttributeRule,
+  WdacFileAttrib,
   WdacFileRule,
   WdacCertRoot,
   CertRootType,
@@ -20,6 +29,9 @@ export type {
   WdacSigningScenario,
   PolicyType,
   WdacPolicy,
+  DiagnosticSeverity,
+  ParseDiagnostic,
+  RuleCollectionIndex,
   DiffStatus,
   OptionDiff,
   FileRuleDiff,

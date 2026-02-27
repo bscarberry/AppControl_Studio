@@ -13,10 +13,17 @@ const SAMPLE_XML = fs.readFileSync(path.join(FIXTURES_DIR, "sample-policy.xml"),
 
 describe("parseWdacXml", () => {
   test("parses a valid WDAC policy XML without errors", () => {
-    const { policy, warnings } = parseWdacXml(SAMPLE_XML, "sample-policy.xml");
+    const { policy, diagnostics } = parseWdacXml(SAMPLE_XML, "sample-policy.xml");
     expect(policy.policyId).toBeDefined();
     expect(policy.policyId).not.toBe("");
-    expect(warnings).toBeInstanceOf(Array);
+    expect(diagnostics).toBeInstanceOf(Array);
+  });
+
+  test("returns index alongside the policy", () => {
+    const { index } = parseWdacXml(SAMPLE_XML);
+    expect(index.fileRulesById).toBeInstanceOf(Map);
+    expect(index.signersById).toBeInstanceOf(Map);
+    expect(index.ekusById).toBeInstanceOf(Map);
   });
 
   test("extracts policy identity fields", () => {
@@ -41,23 +48,48 @@ describe("parseWdacXml", () => {
     expect(windowsEku?.value).toBe("010a2b0601040182370a0306");
   });
 
-  test("parses file rules of all types", () => {
+  test("parses file rules of all kinds", () => {
     const { policy } = parseWdacXml(SAMPLE_XML);
-    const allowRules = policy.fileRules.filter((r) => r.type === "Allow");
-    const denyRules = policy.fileRules.filter((r) => r.type === "Deny");
-    const attribRules = policy.fileRules.filter((r) => r.type === "FileAttrib");
+    const allowRules   = policy.fileRules.filter((r) => r.kind !== "fileAttrib" && (r as { effect: string }).effect === "Allow");
+    const denyRules    = policy.fileRules.filter((r) => r.kind !== "fileAttrib" && (r as { effect: string }).effect === "Deny");
+    const attribRules  = policy.fileRules.filter((r) => r.kind === "fileAttrib");
 
     expect(allowRules.length).toBeGreaterThan(0);
     expect(denyRules.length).toBeGreaterThan(0);
     expect(attribRules.length).toBeGreaterThan(0);
   });
 
-  test("parses hash-based allow rule", () => {
+  test("parses hash-based allow rule with correct kind", () => {
     const { policy } = parseWdacXml(SAMPLE_XML);
-    const hashRule = policy.fileRules.find((r) => r.id === "ID_ALLOW_NOTEPAD");
-    expect(hashRule).toBeDefined();
-    expect(hashRule?.hash).toBeDefined();
-    expect(hashRule?.hashType).toBe("SHA256");
+    const rule = policy.fileRules.find((r) => r.id === "ID_ALLOW_NOTEPAD");
+    expect(rule).toBeDefined();
+    expect(rule?.kind).toBe("hash");
+    if (rule?.kind === "hash") {
+      expect(rule.hash).toBeDefined();
+      expect(rule.hashType).toBe("SHA256");
+      expect(rule.effect).toBe("Allow");
+    }
+  });
+
+  test("parses path-based allow rule with correct kind", () => {
+    const { policy } = parseWdacXml(SAMPLE_XML);
+    const rule = policy.fileRules.find((r) => r.id === "ID_ALLOW_WINDIR");
+    expect(rule?.kind).toBe("path");
+    if (rule?.kind === "path") {
+      expect(rule.filePath).toContain("%windir%");
+      expect(rule.effect).toBe("Allow");
+    }
+  });
+
+  test("parses FileAttrib descriptor with correct kind", () => {
+    const { policy } = parseWdacXml(SAMPLE_XML);
+    const rule = policy.fileRules.find((r) => r.id === "ID_FILEATTRIB_CHROME");
+    expect(rule?.kind).toBe("fileAttrib");
+    if (rule?.kind === "fileAttrib") {
+      expect(rule.productName).toBe("Google Chrome");
+      // fileAttrib has no effect field
+      expect("effect" in rule).toBe(false);
+    }
   });
 
   test("parses signers with cert attributes", () => {
@@ -79,6 +111,20 @@ describe("parseWdacXml", () => {
     expect(userSS).toBeDefined();
     expect(kernelSS!.allowedSigners.length).toBeGreaterThan(0);
     expect(userSS!.fileRuleRefs.length).toBeGreaterThan(0);
+  });
+
+  test("index resolves signers by scenario", () => {
+    const { index } = parseWdacXml(SAMPLE_XML);
+    const userSignerIds = index.signerIdsByScenario.get(12);
+    expect(userSignerIds).toBeDefined();
+    expect(userSignerIds!.size).toBeGreaterThan(0);
+  });
+
+  test("index resolves fileAttribs by signer", () => {
+    const { index } = parseWdacXml(SAMPLE_XML);
+    const chromeAttribs = index.fileAttribsBySignerId.get("ID_SIGNER_GOOGLE");
+    expect(chromeAttribs).toBeDefined();
+    expect(chromeAttribs![0].kind).toBe("fileAttrib");
   });
 
   test("throws for non-XML input", () => {
