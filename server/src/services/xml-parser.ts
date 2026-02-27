@@ -74,6 +74,7 @@ export function parseWdacXml(xmlContent: string, fileName?: string): ParseResult
         "FileRuleRef", "CertEKU", "FileAttrib",
         "UpdatePolicySigner", "CiSigner",
         "ExceptDenyRule", "ExceptAllowRule",
+        "Setting",
       ]);
       return alwaysArray.has(_name) && !isLeafNode;
     },
@@ -98,7 +99,10 @@ export function parseWdacXml(xmlContent: string, fileName?: string): ParseResult
   const policyId = normalizeGuid(attr(root, "PolicyID") ?? attr(root, "policyId")) ?? "";
   const basePolicyId = normalizeGuid(attr(root, "BasePolicyID") ?? attr(root, "basePolicyId"));
   const policyTypeId = normalizeGuid(attr(root, "PolicyTypeID") ?? attr(root, "policyTypeId"));
-  const friendlyName = attr(root, "FriendlyName") ?? attr(root, "friendlyName");
+  const friendlyName =
+    attr(root, "FriendlyName") ??
+    attr(root, "friendlyName") ??
+    parseSettingsName(root);
   const versionEx = attr(root, "VersionEx") ?? attr(root, "versionEx") ?? "10.0.0.0";
   const platformId = normalizeGuid(attr(root, "PlatformID") ?? attr(root, "platformId"));
   const hvciRaw = attr(root, "HvciOptions") ?? attr(root, "hvciOptions");
@@ -458,6 +462,34 @@ function parseUpdatePolicySigners(root: Record<string, unknown>): string[] {
   return asArray(section["UpdatePolicySigner"])
     .map((u) => attr(u as Record<string, unknown>, "SignerId") ?? attr(u as Record<string, unknown>, "SignerID") ?? "")
     .filter(Boolean);
+}
+
+/**
+ * Extracts the policy name from the <Settings> block used by policies that
+ * store identity via:
+ *   <Setting Provider="PolicyInfo" Key="Information" ValueName="Name">
+ *     <Value><String>...</String></Value>
+ *   </Setting>
+ */
+function parseSettingsName(root: Record<string, unknown>): string | undefined {
+  const settingsSection = root["Settings"] as Record<string, unknown> | undefined;
+  if (!settingsSection) return undefined;
+
+  const settingList = asArray(settingsSection["Setting"] as unknown);
+  for (const s of settingList) {
+    const sObj = s as Record<string, unknown>;
+    const provider = attr(sObj, "Provider");
+    const key = attr(sObj, "Key");
+    const valueName = attr(sObj, "ValueName");
+    if (provider === "PolicyInfo" && key === "Information" && valueName === "Name") {
+      const valueEl = sObj["Value"] as Record<string, unknown> | undefined;
+      if (valueEl) {
+        const str = valueEl["String"];
+        if (str != null) return String(str);
+      }
+    }
+  }
+  return undefined;
 }
 
 function parseCiSigners(root: Record<string, unknown>): string[] {
