@@ -131,7 +131,7 @@ function compareOptions(left: WdacPolicy, right: WdacPolicy): OptionDiff[] {
 
 function fileRuleFingerprint(rule: WdacFileRule): string {
   // Canonical fingerprint for structural equivalence (excludes ID)
-  const { id: _id, ...content } = rule as Record<string, unknown>;
+  const { id: _id, ...content } = rule as unknown as Record<string, unknown>;
   return JSON.stringify(content);
 }
 
