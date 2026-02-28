@@ -99,7 +99,7 @@ function ruleKindIcon(kind: string) {
 function ruleValueSnippet(rule: DiffedRule | ModifiedRule): string {
   const r = "rule" in rule ? rule.rule : rule.rightRule;
   switch ((r as { kind: string }).kind) {
-    case "hash":   return (r as WdacHashRule).hash?.substring(0, 24) + "…" ?? "";
+    case "hash":   return ((r as WdacHashRule).hash?.substring(0, 24) ?? "") + "…";
     case "path":   return (r as WdacPathRule).filePath ?? "";
     case "package":return (r as WdacPackageRule).packageFamilyName ?? "";
     case "signer": return (r as WdacSignerRule).certPublisher ?? (r as WdacSignerRule).name ?? "";
