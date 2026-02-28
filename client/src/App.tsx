@@ -6,6 +6,7 @@ import { ImportEventsPage } from "./pages/ImportEventsPage.tsx";
 import { BuildPolicyPage } from "./pages/BuildPolicyPage.tsx";
 import { ExportPage } from "./pages/ExportPage.tsx";
 import { RuleEnginePage } from "./pages/RuleEnginePage.tsx";
+import { SemanticComparePage } from "./pages/SemanticComparePage.tsx";
 
 export default function App() {
   return (
@@ -16,6 +17,7 @@ export default function App() {
           <Routes>
             <Route path="/" element={<PolicyEditorPage />} />
             <Route path="/compare" element={<ComparePage />} />
+            <Route path="/semantic-compare" element={<SemanticComparePage />} />
             <Route path="/import-events" element={<ImportEventsPage />} />
             <Route path="/build" element={<BuildPolicyPage />} />
             <Route path="/export" element={<ExportPage />} />

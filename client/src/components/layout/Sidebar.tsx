@@ -7,6 +7,7 @@ import {
   Upload,
   Activity,
   Cpu,
+  ShieldCheck,
   ChevronRight,
 } from "lucide-react";
 import clsx from "clsx";
@@ -31,6 +32,12 @@ const navItems: NavItem[] = [
     label: "Compare",
     icon: <GitCompare size={16} />,
     description: "Diff two policies structurally",
+  },
+  {
+    to: "/semantic-compare",
+    label: "Semantic Compare",
+    icon: <ShieldCheck size={16} />,
+    description: "Security-aware policy diff",
   },
   {
     to: "/import-events",

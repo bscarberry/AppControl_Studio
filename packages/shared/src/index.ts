@@ -67,6 +67,22 @@ export type {
   ProposeRulesResponse,
 } from "./rule-engine";
 
+// Type re-exports from policy-diff
+export type {
+  TrustDirection,
+  RiskVerdict,
+  FindingSeverity,
+  MatchKind,
+  SignerScopeChange,
+  DiffedRule,
+  ModifiedRule,
+  OptionSemanticChange,
+  RiskFactor,
+  RiskAssessment,
+  HumanExplanation,
+  PolicySemanticDiff,
+} from "./policy-diff";
+
 // Type re-exports from api
 export type {
   ApiSuccess,
@@ -88,4 +104,6 @@ export type {
   ExplainPolicyRequest,
   ExplainPolicyResponse,
   ProposeRulesApiRequest,
+  SemanticComparePoliciesRequest,
+  SemanticComparePoliciesResponse,
 } from "./api";

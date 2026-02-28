@@ -6,6 +6,7 @@ import { comparePolicies } from "../services/policy-comparator.js";
 import { explainPolicy } from "../services/policy-explainer.js";
 import { buildPolicyFromEvents } from "../services/policy-builder.js";
 import { proposeRules } from "../services/rule-engine.js";
+import { semanticComparePolicies } from "../services/semantic-comparator.js";
 import { POLICY_RULE_OPTIONS } from "@appcontrol/shared";
 import type { ParsedCiEvent } from "@appcontrol/shared";
 
@@ -84,6 +85,34 @@ policyRouter.post("/compare", (req: Request, res: Response) => {
     res.status(422).json({
       ok: false,
       error: { code: "COMPARE_ERROR", message: (err as Error).message },
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Semantic comparison — security-aware diff with risk assessment
+// ---------------------------------------------------------------------------
+policyRouter.post("/semantic-compare", (req: Request, res: Response) => {
+  const schema = z.object({
+    leftXml: z.string().min(1),
+    rightXml: z.string().min(1),
+  });
+
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ ok: false, error: { code: "VALIDATION", message: parsed.error.message } });
+    return;
+  }
+
+  try {
+    const left = parseWdacXml(parsed.data.leftXml, "left");
+    const right = parseWdacXml(parsed.data.rightXml, "right");
+    const diff = semanticComparePolicies(left.policy, right.policy);
+    res.json({ ok: true, data: { diff } });
+  } catch (err) {
+    res.status(422).json({
+      ok: false,
+      error: { code: "SEMANTIC_COMPARE_ERROR", message: (err as Error).message },
     });
   }
 });

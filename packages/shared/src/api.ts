@@ -141,6 +141,18 @@ export interface ProposeRulesApiRequest {
   includeDenyRules: boolean;
 }
 
+/** POST /api/policy/semantic-compare — security-aware diff of two normalized policy objects */
+export interface SemanticComparePoliciesRequest {
+  leftXml: string;
+  rightXml: string;
+}
+
+export type { PolicySemanticDiff } from "./policy-diff";
+
+export interface SemanticComparePoliciesResponse {
+  diff: import("./policy-diff").PolicySemanticDiff;
+}
+
 /** POST /api/policy/explain — returns human-readable explanation of a policy */
 export interface ExplainPolicyRequest {
   policy: WdacPolicy;

@@ -7,6 +7,7 @@ import type {
   ParsePolicyResponse,
   GeneratePolicyResponse,
   ComparePoliciesResponse,
+  SemanticComparePoliciesResponse,
   EventImportResult,
   ExplainPolicyResponse,
   CreatePolicyFromEventsResponse,
@@ -52,6 +53,9 @@ export const policyApi = {
 
   compare: (leftXml: string, rightXml: string) =>
     post<ComparePoliciesResponse>("/policy/compare", { leftXml, rightXml }),
+
+  semanticCompare: (leftXml: string, rightXml: string) =>
+    post<SemanticComparePoliciesResponse>("/policy/semantic-compare", { leftXml, rightXml }),
 
   explain: (policy: WdacPolicy) =>
     post<ExplainPolicyResponse>("/policy/explain", { policy }),
