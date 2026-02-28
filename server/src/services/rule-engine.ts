@@ -961,7 +961,7 @@ function detectMultipleVersions(
 // ---------------------------------------------------------------------------
 
 export function proposeRules(
-  req: ProposeRulesRequest & { events: ParsedCiEvent[] }
+  req: Omit<ProposeRulesRequest, "events"> & { events: ParsedCiEvent[] }
 ): ProposedPolicyChanges {
   // Reset sequence counters per invocation
   _signerSeq = 0;
