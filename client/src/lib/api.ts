@@ -12,6 +12,7 @@ import type {
   ExplainPolicyResponse,
   CreatePolicyFromEventsResponse,
   ProposeRulesResponse,
+  HuntingIngestApiResponse,
   WdacPolicy,
   ParsedCiEvent,
 } from "@appcontrol/shared";
@@ -81,6 +82,15 @@ export const policyApi = {
     includePathRules: boolean;
     includeDenyRules: boolean;
   }) => post<ProposeRulesResponse>("/policy/propose-rules", params),
+
+  ingestAdvancedHunting: (params: {
+    format: "json" | "csv" | "auto";
+    content: string;
+    preferPublisherRules?: boolean;
+    scopePublisherRules?: boolean;
+    includePathRules?: boolean;
+    effect?: "Allow" | "Deny";
+  }) => post<HuntingIngestApiResponse>("/policy/ingest-advanced-hunting", params),
 };
 
 // ---------------------------------------------------------------------------

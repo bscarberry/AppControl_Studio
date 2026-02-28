@@ -8,6 +8,7 @@ import {
   Activity,
   Cpu,
   ShieldCheck,
+  Search,
   ChevronRight,
 } from "lucide-react";
 import clsx from "clsx";
@@ -38,6 +39,12 @@ const navItems: NavItem[] = [
     label: "Semantic Compare",
     icon: <ShieldCheck size={16} />,
     description: "Security-aware policy diff",
+  },
+  {
+    to: "/advanced-hunting",
+    label: "Advanced Hunting",
+    icon: <Search size={16} />,
+    description: "AH export → WDAC rule candidates",
   },
   {
     to: "/import-events",

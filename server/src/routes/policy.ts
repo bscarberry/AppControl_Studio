@@ -7,6 +7,7 @@ import { explainPolicy } from "../services/policy-explainer.js";
 import { buildPolicyFromEvents } from "../services/policy-builder.js";
 import { proposeRules } from "../services/rule-engine.js";
 import { semanticComparePolicies } from "../services/semantic-comparator.js";
+import { ingestAdvancedHunting } from "../services/advanced-hunting-ingestor.js";
 import { POLICY_RULE_OPTIONS } from "@appcontrol/shared";
 import type { ParsedCiEvent } from "@appcontrol/shared";
 
@@ -204,6 +205,36 @@ policyRouter.post("/propose-rules", (req: Request, res: Response) => {
     res.status(422).json({
       ok: false,
       error: { code: "RULE_ENGINE_ERROR", message: (err as Error).message },
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Advanced Hunting ingest — JSON/CSV → deduplicated binaries + rule candidates
+// ---------------------------------------------------------------------------
+policyRouter.post("/ingest-advanced-hunting", (req: Request, res: Response) => {
+  const schema = z.object({
+    format: z.enum(["json", "csv", "auto"]),
+    content: z.string().min(1),
+    preferPublisherRules: z.boolean().optional(),
+    scopePublisherRules: z.boolean().optional(),
+    includePathRules: z.boolean().optional(),
+    effect: z.enum(["Allow", "Deny"]).optional(),
+  });
+
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ ok: false, error: { code: "VALIDATION", message: parsed.error.message } });
+    return;
+  }
+
+  try {
+    const result = ingestAdvancedHunting(parsed.data);
+    res.json({ ok: true, data: result });
+  } catch (err) {
+    res.status(422).json({
+      ok: false,
+      error: { code: "INGEST_ERROR", message: (err as Error).message },
     });
   }
 });

@@ -83,6 +83,19 @@ export type {
   PolicySemanticDiff,
 } from "./policy-diff";
 
+// Type re-exports from hunting-ingest
+export type {
+  HuntingSigningCoverage,
+  HuntingRuleType,
+  HuntingRuleRisk,
+  HuntingBinary,
+  HuntingRuleCandidate,
+  HuntingImportWarning,
+  HuntingImportStats,
+  HuntingImportRequest,
+  HuntingImportResult,
+} from "./hunting-ingest";
+
 // Type re-exports from api
 export type {
   ApiSuccess,
@@ -106,4 +119,6 @@ export type {
   ProposeRulesApiRequest,
   SemanticComparePoliciesRequest,
   SemanticComparePoliciesResponse,
+  HuntingIngestApiRequest,
+  HuntingIngestApiResponse,
 } from "./api";

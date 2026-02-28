@@ -153,6 +153,25 @@ export interface SemanticComparePoliciesResponse {
   diff: import("./policy-diff").PolicySemanticDiff;
 }
 
+/** POST /api/policy/ingest-advanced-hunting — parse AH export → rule candidates */
+export interface HuntingIngestApiRequest {
+  format: "json" | "csv" | "auto";
+  content: string;
+  preferPublisherRules?: boolean;
+  scopePublisherRules?: boolean;
+  includePathRules?: boolean;
+  effect?: "Allow" | "Deny";
+}
+
+export type { HuntingImportResult } from "./hunting-ingest";
+
+export interface HuntingIngestApiResponse {
+  binaries: import("./hunting-ingest").HuntingBinary[];
+  ruleCandidates: import("./hunting-ingest").HuntingRuleCandidate[];
+  stats: import("./hunting-ingest").HuntingImportStats;
+  warnings: import("./hunting-ingest").HuntingImportWarning[];
+}
+
 /** POST /api/policy/explain — returns human-readable explanation of a policy */
 export interface ExplainPolicyRequest {
   policy: WdacPolicy;
