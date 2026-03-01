@@ -1,206 +1,101 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { Upload, AlertCircle, CheckCircle, Clock, Shield, ShieldAlert } from "lucide-react";
+import {
+  Upload, AlertCircle, CheckCircle, Clock, Shield, ShieldAlert,
+  ChevronDown, ChevronRight, AlertTriangle, Hash, FileWarning,
+  Server, Eye, HelpCircle, Activity, Search,
+} from "lucide-react";
 import clsx from "clsx";
-import { eventsApi } from "../lib/api.ts";
+import { v4 as uuidv4 } from "uuid";
+import { eventsApi, policyApi } from "../lib/api.ts";
 import { useAppStore } from "../store/index.ts";
 import { Header } from "../components/layout/Header.tsx";
 import { FileDropZone } from "../components/common/FileDropZone.tsx";
 import { LoadingSpinner } from "../components/common/LoadingSpinner.tsx";
-import type { ParsedCiEvent, EventImportResult } from "@appcontrol/shared";
+import type {
+  ParsedCiEvent, EventImportResult,
+  HuntingBinary, HuntingImportResult, HuntingImportWarning,
+  HuntingRuleCandidate, HuntingRuleRisk, HuntingRuleType, HuntingSigningCoverage,
+  CreatePolicyFromEventsResponse,
+} from "@appcontrol/shared";
+
+type PageTab = "ci-events" | "advanced-hunting" | "build-policy";
+
+// ===========================================================================
+// CI EVENTS TAB
+// ===========================================================================
 
 type ImportFormat = "evtx-json" | "json" | "csv" | "hunting-json" | "hunting-csv";
 
-interface FormatOption {
-  id: ImportFormat;
-  label: string;
-  description: string;
-  accept: string;
-}
-
-const FORMAT_OPTIONS: FormatOption[] = [
-  {
-    id: "evtx-json",
-    label: "EVTX JSON Export",
-    description: "Get-WinEvent ... | ConvertTo-Json",
-    accept: ".json",
-  },
-  {
-    id: "hunting-json",
-    label: "Advanced Hunting JSON",
-    description: "MDE Advanced Hunting query export (JSON)",
-    accept: ".json",
-  },
-  {
-    id: "hunting-csv",
-    label: "Advanced Hunting CSV",
-    description: "MDE Advanced Hunting query export (CSV)",
-    accept: ".csv",
-  },
+const FORMAT_OPTIONS = [
+  { id: "evtx-json" as ImportFormat, label: "EVTX JSON Export",      description: "Get-WinEvent ... | ConvertTo-Json", accept: ".json" },
+  { id: "hunting-json" as ImportFormat, label: "Advanced Hunting JSON", description: "MDE Advanced Hunting query export (JSON)", accept: ".json" },
+  { id: "hunting-csv" as ImportFormat, label: "Advanced Hunting CSV",  description: "MDE Advanced Hunting query export (CSV)",  accept: ".csv"  },
 ];
-
-export function ImportEventsPage() {
-  const { setImportedEvents, importedEvents, clearEvents } = useAppStore();
-  const [format, setFormat] = useState<ImportFormat>("evtx-json");
-  const [result, setResult] = useState<EventImportResult | null>(null);
-
-  const parseMutation = useMutation({
-    mutationFn: ({ content, format }: { content: string; format: ImportFormat }) => {
-      if (format === "hunting-json") return eventsApi.parseHunting(content, "json");
-      if (format === "hunting-csv") return eventsApi.parseHunting(content, "csv");
-      return eventsApi.parse(content, format as "evtx-json" | "json" | "csv");
-    },
-    onSuccess: (data) => {
-      setResult(data);
-      setImportedEvents(data.events);
-    },
-  });
-
-  const selectedFormat = FORMAT_OPTIONS.find((f) => f.id === format)!;
-
-  return (
-    <div className="flex flex-col h-full">
-      <Header
-        title="Import Events"
-        subtitle="Parse CodeIntegrity event logs and Advanced Hunting results"
-        actions={
-          importedEvents.length > 0 ? (
-            <div className="flex items-center gap-3">
-              <span className="text-xs text-text-muted">{importedEvents.length} events loaded</span>
-              <button className="btn-ghost" onClick={() => { clearEvents(); setResult(null); }}>
-                Clear
-              </button>
-            </div>
-          ) : null
-        }
-      />
-
-      <div className="flex-1 overflow-auto p-6">
-        <div className="max-w-3xl">
-          {/* Format selector */}
-          <div className="card p-4 mb-5">
-            <h2 className="section-header">Input Format</h2>
-            <div className="grid grid-cols-3 gap-2">
-              {FORMAT_OPTIONS.map((opt) => (
-                <button
-                  key={opt.id}
-                  onClick={() => setFormat(opt.id)}
-                  className={clsx(
-                    "text-left p-3 rounded border text-xs transition-colors",
-                    format === opt.id
-                      ? "border-accent-blue bg-accent-blue-dim/20 text-text-primary"
-                      : "border-border text-text-muted hover:border-border-strong hover:text-text-secondary"
-                  )}
-                >
-                  <p className="font-medium text-sm mb-0.5">{opt.label}</p>
-                  <p className="text-text-muted">{opt.description}</p>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Collection instructions */}
-          <CollectionInstructions format={format} />
-
-          {/* File upload */}
-          <div className="mb-5">
-            <FileDropZone
-              accept={selectedFormat.accept}
-              label={`Drop ${selectedFormat.label}`}
-              description={selectedFormat.description}
-              onFile={(content) => parseMutation.mutate({ content, format })}
-            />
-          </div>
-
-          {parseMutation.isPending && (
-            <div className="flex justify-center py-8">
-              <LoadingSpinner label="Parsing events..." />
-            </div>
-          )}
-
-          {parseMutation.isError && (
-            <div className="p-4 bg-accent-red-dim/30 border border-accent-red/20 rounded text-sm text-accent-red mb-4">
-              {(parseMutation.error as Error).message}
-            </div>
-          )}
-
-          {result && (
-            <EventImportResults result={result} />
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Collection instructions
-// ---------------------------------------------------------------------------
 
 function CollectionInstructions({ format }: { format: ImportFormat }) {
   const commands: Record<ImportFormat, { title: string; code: string }> = {
     "evtx-json": {
       title: "Collect CodeIntegrity Events (PowerShell)",
-      code: `Get-WinEvent -LogName "Microsoft-Windows-CodeIntegrity/Operational" \`
-  | Where-Object { $_.Id -in @(3076,3077,3033,3034,3089,3097,3098) } \`
-  | ConvertTo-Json -Depth 5 \`
-  | Out-File -FilePath ".\\ci-events.json" -Encoding utf8`,
+      code: `Get-WinEvent -LogName "Microsoft-Windows-CodeIntegrity/Operational" \`\n  | Where-Object { $_.Id -in @(3076,3077,3033,3034,3089,3097,3098) } \`\n  | ConvertTo-Json -Depth 5 \`\n  | Out-File -FilePath ".\\ci-events.json" -Encoding utf8`,
     },
-    json: {
-      title: "Collect Events (JSON format)",
-      code: `Get-WinEvent -LogName "Microsoft-Windows-CodeIntegrity/Operational" | ConvertTo-Json`,
-    },
+    json: { title: "Collect Events (JSON format)", code: `Get-WinEvent -LogName "Microsoft-Windows-CodeIntegrity/Operational" | ConvertTo-Json` },
     csv: {
       title: "Advanced Hunting Query (Kusto)",
-      code: `DeviceEvents
-| where ActionType in ("AppControlCodeIntegrityPolicyAudited", "AppControlCodeIntegrityPolicyBlocked")
-| project Timestamp, DeviceName, ActionType, FileName, FolderPath, SHA256, InitiatingProcessFileName, AdditionalFields
-| export to csv`,
+      code: `DeviceEvents\n| where ActionType in ("AppControlCodeIntegrityPolicyAudited", "AppControlCodeIntegrityPolicyBlocked")\n| project Timestamp, DeviceName, ActionType, FileName, FolderPath, SHA256, InitiatingProcessFileName, AdditionalFields\n| export to csv`,
     },
     "hunting-json": {
       title: "Advanced Hunting Query (MDE Portal)",
-      code: `DeviceEvents
-| where ActionType in ("AppControlCodeIntegrityPolicyAudited", "AppControlCodeIntegrityPolicyBlocked",
-    "AppControlCIScriptAudited", "AppControlCIScriptBlocked")
-| extend Fields = parse_json(AdditionalFields)
-| project Timestamp, DeviceName, ActionType, FileName, FolderPath,
-    SHA256, SHA1, InitiatingProcessFileName,
-    PolicyName = tostring(Fields.PolicyName),
-    PolicyGuid = tostring(Fields.PolicyGuid),
-    OriginalFileName = tostring(Fields.OriginalFileName),
-    ProductName = tostring(Fields.ProductName)
-| order by Timestamp desc`,
+      code: `DeviceEvents\n| where ActionType in ("AppControlCodeIntegrityPolicyAudited", "AppControlCodeIntegrityPolicyBlocked",\n    "AppControlCIScriptAudited", "AppControlCIScriptBlocked")\n| extend Fields = parse_json(AdditionalFields)\n| project Timestamp, DeviceName, ActionType, FileName, FolderPath,\n    SHA256, SHA1, InitiatingProcessFileName,\n    PolicyName = tostring(Fields.PolicyName),\n    PolicyGuid = tostring(Fields.PolicyGuid),\n    OriginalFileName = tostring(Fields.OriginalFileName),\n    ProductName = tostring(Fields.ProductName)\n| order by Timestamp desc`,
     },
     "hunting-csv": {
       title: "Export Hunting Results as CSV",
-      code: `// Run the query above in Microsoft Defender portal > Hunting > Advanced Hunting
-// Click Export > Download as CSV`,
+      code: `// Run the query above in Microsoft Defender portal > Hunting > Advanced Hunting\n// Click Export > Download as CSV`,
     },
   };
-
   const { title, code } = commands[format];
-
   return (
     <div className="card p-4 mb-5">
       <h2 className="section-header">Collection Instructions</h2>
       <p className="text-xs font-medium text-text-secondary mb-2">{title}</p>
-      <pre className="mono text-xs bg-surface-2 p-3 rounded border border-border text-accent-blue overflow-auto">
-        {code}
-      </pre>
+      <pre className="mono text-xs bg-surface-2 p-3 rounded border border-border text-accent-blue overflow-auto">{code}</pre>
     </div>
   );
 }
 
-// ---------------------------------------------------------------------------
-// Import results
-// ---------------------------------------------------------------------------
+function SummaryCard({ label, value, color }: { label: string; value: number; color?: "red" | "yellow" | "blue" | "green" }) {
+  const colorClass = color
+    ? { red: "text-accent-red", yellow: "text-accent-yellow", blue: "text-accent-blue", green: "text-accent-green" }[color]
+    : "text-text-primary";
+  return (
+    <div className="bg-surface-2 rounded p-3 text-center">
+      <p className={clsx("text-xl font-bold mono", colorClass)}>{value}</p>
+      <p className="text-xs text-text-muted">{label}</p>
+    </div>
+  );
+}
+
+function EventRow({ event }: { event: ParsedCiEvent }) {
+  return (
+    <tr>
+      <td>
+        {event.severity === "block" ? <span className="tag-red flex items-center gap-1"><ShieldAlert size={10} />Block</span>
+          : event.severity === "audit" ? <span className="tag-yellow flex items-center gap-1"><Shield size={10} />Audit</span>
+          : <span className="tag-gray">Info</span>}
+      </td>
+      <td className="mono text-xs text-text-muted whitespace-nowrap">{event.timestamp ? new Date(event.timestamp).toLocaleString() : "—"}</td>
+      <td className="text-xs">{event.machineName ?? "—"}</td>
+      <td className="text-xs max-w-xs truncate" title={event.filePath}>{event.filePath}</td>
+      <td className="mono text-xs text-text-muted">{event.sha256Hash ? `${event.sha256Hash.substring(0, 16)}…` : "—"}</td>
+      <td className="mono text-xs">{event.eventId}</td>
+    </tr>
+  );
+}
 
 function EventImportResults({ result }: { result: EventImportResult }) {
   const { summary, events, parseErrors } = result;
-
   return (
     <div className="space-y-4">
-      {/* Summary */}
       <div className="card p-4">
         <h2 className="section-header">Import Summary</h2>
         <div className="grid grid-cols-4 gap-3">
@@ -211,50 +106,31 @@ function EventImportResults({ result }: { result: EventImportResult }) {
         </div>
         {summary.timeRange && (
           <p className="text-xs text-text-muted mt-3 flex items-center gap-1">
-            <Clock size={11} />
-            {summary.timeRange.earliest} — {summary.timeRange.latest}
+            <Clock size={11} />{summary.timeRange.earliest} — {summary.timeRange.latest}
           </p>
         )}
       </div>
-
-      {/* Parse errors */}
       {parseErrors.length > 0 && (
         <div className="card p-4 border-accent-yellow/30">
           <h2 className="section-header text-accent-yellow">Parse Warnings ({parseErrors.length})</h2>
           <div className="space-y-1">
             {parseErrors.slice(0, 10).map((err, i) => (
               <p key={i} className="text-xs text-text-muted">
-                {err.line !== undefined && <span className="mono mr-2">L{err.line}</span>}
-                {err.message}
+                {err.line !== undefined && <span className="mono mr-2">L{err.line}</span>}{err.message}
               </p>
             ))}
-            {parseErrors.length > 10 && (
-              <p className="text-xs text-text-muted italic">...and {parseErrors.length - 10} more</p>
-            )}
+            {parseErrors.length > 10 && <p className="text-xs text-text-muted italic">...and {parseErrors.length - 10} more</p>}
           </div>
         </div>
       )}
-
-      {/* Event list */}
       <div className="card p-4">
         <h2 className="section-header">Events ({events.length})</h2>
         <div className="overflow-auto max-h-96">
           <table className="data-table">
             <thead className="sticky top-0 bg-surface-1">
-              <tr>
-                <th>Severity</th>
-                <th>Time</th>
-                <th>Machine</th>
-                <th>File</th>
-                <th>Hash (SHA256)</th>
-                <th>Event ID</th>
-              </tr>
+              <tr><th>Severity</th><th>Time</th><th>Machine</th><th>File</th><th>Hash (SHA256)</th><th>Event ID</th></tr>
             </thead>
-            <tbody>
-              {events.map((event, i) => (
-                <EventRow key={i} event={event} />
-              ))}
-            </tbody>
+            <tbody>{events.map((event, i) => <EventRow key={i} event={event} />)}</tbody>
           </table>
         </div>
       </div>
@@ -262,47 +138,723 @@ function EventImportResults({ result }: { result: EventImportResult }) {
   );
 }
 
-function EventRow({ event }: { event: ParsedCiEvent }) {
+function CiEventsTab() {
+  const { setImportedEvents, importedEvents, clearEvents } = useAppStore();
+  const [format, setFormat] = useState<ImportFormat>("evtx-json");
+  const [result, setResult] = useState<EventImportResult | null>(null);
+
+  const parseMutation = useMutation({
+    mutationFn: ({ content, format }: { content: string; format: ImportFormat }) => {
+      if (format === "hunting-json") return eventsApi.parseHunting(content, "json");
+      if (format === "hunting-csv")  return eventsApi.parseHunting(content, "csv");
+      return eventsApi.parse(content, format as "evtx-json" | "json" | "csv");
+    },
+    onSuccess: (data) => { setResult(data); setImportedEvents(data.events); },
+  });
+
+  const selectedFormat = FORMAT_OPTIONS.find((f) => f.id === format)!;
+
   return (
-    <tr>
-      <td>
-        {event.severity === "block" ? (
-          <span className="tag-red flex items-center gap-1"><ShieldAlert size={10} />Block</span>
-        ) : event.severity === "audit" ? (
-          <span className="tag-yellow flex items-center gap-1"><Shield size={10} />Audit</span>
-        ) : (
-          <span className="tag-gray">Info</span>
+    <div className="flex-1 overflow-auto p-6">
+      <div className="max-w-3xl">
+        {importedEvents.length > 0 && (
+          <div className="flex items-center justify-between mb-4">
+            <span className="text-xs text-text-muted">{importedEvents.length} events loaded</span>
+            <button className="btn-ghost" onClick={() => { clearEvents(); setResult(null); }}>Clear</button>
+          </div>
         )}
-      </td>
-      <td className="mono text-xs text-text-muted whitespace-nowrap">
-        {event.timestamp ? new Date(event.timestamp).toLocaleString() : "—"}
-      </td>
-      <td className="text-xs">{event.machineName ?? "—"}</td>
-      <td className="text-xs max-w-xs truncate" title={event.filePath}>{event.filePath}</td>
-      <td className="mono text-xs text-text-muted">
-        {event.sha256Hash ? `${event.sha256Hash.substring(0, 16)}…` : "—"}
-      </td>
-      <td className="mono text-xs">{event.eventId}</td>
-    </tr>
+        <div className="card p-4 mb-5">
+          <h2 className="section-header">Input Format</h2>
+          <div className="grid grid-cols-3 gap-2">
+            {FORMAT_OPTIONS.map((opt) => (
+              <button key={opt.id} onClick={() => setFormat(opt.id)}
+                className={clsx("text-left p-3 rounded border text-xs transition-colors",
+                  format === opt.id ? "border-accent-blue bg-accent-blue-dim/20 text-text-primary" : "border-border text-text-muted hover:border-border-strong hover:text-text-secondary")}>
+                <p className="font-medium text-sm mb-0.5">{opt.label}</p>
+                <p className="text-text-muted">{opt.description}</p>
+              </button>
+            ))}
+          </div>
+        </div>
+        <CollectionInstructions format={format} />
+        <div className="mb-5">
+          <FileDropZone accept={selectedFormat.accept} label={`Drop ${selectedFormat.label}`}
+            description={selectedFormat.description} onFile={(content) => parseMutation.mutate({ content, format })} />
+        </div>
+        {parseMutation.isPending && <div className="flex justify-center py-8"><LoadingSpinner label="Parsing events..." /></div>}
+        {parseMutation.isError && (
+          <div className="p-4 bg-accent-red-dim/30 border border-accent-red/20 rounded text-sm text-accent-red mb-4">
+            {(parseMutation.error as Error).message}
+          </div>
+        )}
+        {result && <EventImportResults result={result} />}
+      </div>
+    </div>
   );
 }
 
-function SummaryCard({
-  label,
-  value,
-  color,
-}: {
-  label: string;
-  value: number;
-  color?: "red" | "yellow" | "blue" | "green";
-}) {
-  const colorClass = color
-    ? { red: "text-accent-red", yellow: "text-accent-yellow", blue: "text-accent-blue", green: "text-accent-green" }[color]
-    : "text-text-primary";
+// ===========================================================================
+// ADVANCED HUNTING TAB
+// ===========================================================================
+
+function riskClass(risk: HuntingRuleRisk): string {
+  return { safe: "tag-green", low: "tag-blue", medium: "tag-yellow", high: "tag-orange", critical: "tag-red" }[risk];
+}
+function coverageClass(coverage: HuntingSigningCoverage): string {
+  return { full: "tag-green", partial: "tag-yellow", "hash-only": "tag-blue", unsigned: "tag-orange", "no-hash": "tag-red" }[coverage];
+}
+function ruleTypeLabel(t: HuntingRuleType): string {
+  return { "publisher-scoped": "Publisher (scoped)", publisher: "Publisher", hash: "Hash", path: "Path", "path-wildcard": "Path (wildcard)" }[t];
+}
+function ruleTypeIcon(t: HuntingRuleType) {
+  if (t === "publisher-scoped" || t === "publisher") return <Shield size={13} />;
+  if (t === "hash") return <Hash size={13} />;
+  return <FileWarning size={13} />;
+}
+
+function HuntingFileDropZone({ onFile, label }: { onFile: (content: string, name: string) => void; label: string }) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [dragging, setDragging] = useState(false);
+  function handleFile(file: File) {
+    const reader = new FileReader();
+    reader.onload = (e) => onFile((e.target?.result as string) ?? "", file.name);
+    reader.readAsText(file, "utf-8");
+  }
   return (
-    <div className="bg-surface-2 rounded p-3 text-center">
-      <p className={clsx("text-xl font-bold mono", colorClass)}>{value}</p>
-      <p className="text-xs text-text-muted">{label}</p>
+    <div onClick={() => inputRef.current?.click()}
+      onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+      onDragLeave={() => setDragging(false)}
+      onDrop={(e) => { e.preventDefault(); setDragging(false); const f = e.dataTransfer.files[0]; if (f) handleFile(f); }}
+      className={clsx("border-2 border-dashed rounded-lg p-8 cursor-pointer text-center transition-colors",
+        dragging ? "border-accent-blue bg-accent-blue-dim" : "border-border hover:border-accent-blue hover:bg-surface-2")}>
+      <Upload size={28} className="mx-auto mb-2 text-text-muted" />
+      <p className="text-sm text-text-secondary">{label}</p>
+      <p className="text-xs text-text-muted mt-1">JSON or CSV · drag & drop or click</p>
+      <input ref={inputRef} type="file" accept=".json,.csv,.txt" className="hidden"
+        onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = ""; }} />
+    </div>
+  );
+}
+
+function HuntingStatsBar({ result }: { result: HuntingImportResult }) {
+  const { stats } = result;
+  const items = [
+    { label: "Rows parsed",      value: stats.totalRowsParsed },
+    { label: "Valid rows",       value: stats.validRows },
+    { label: "Unique binaries",  value: stats.uniqueBinaries },
+    { label: "Signed",           value: stats.signedBinaries,          colorClass: "text-accent-green" },
+    { label: "Partial signing",  value: stats.partialSigningBinaries,  colorClass: "text-accent-yellow" },
+    { label: "Unsigned",         value: stats.unsignedBinaries,        colorClass: "text-accent-orange" },
+    { label: "No hash",          value: stats.noHashBinaries,          colorClass: "text-accent-red" },
+    { label: "Rule candidates",  value: result.ruleCandidates.length,  colorClass: "text-accent-blue" },
+  ];
+  return (
+    <div className="panel">
+      <div className="flex items-center justify-between mb-3">
+        <p className="text-xs font-medium text-text-secondary uppercase tracking-wider">Import Summary</p>
+        <span className="tag tag-blue text-xs">{stats.detectedSchema}</span>
+      </div>
+      <div className="grid grid-cols-4 gap-3">
+        {items.map((item) => (
+          <div key={item.label} className="bg-surface-2 rounded p-2.5">
+            <p className={clsx("text-lg font-semibold tabular-nums", item.colorClass ?? "text-text-primary")}>{item.value.toLocaleString()}</p>
+            <p className="text-xs text-text-muted mt-0.5">{item.label}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function HuntingWarningsPanel({ warnings }: { warnings: HuntingImportWarning[] }) {
+  const [open, setOpen] = useState(true);
+  if (warnings.length === 0) return null;
+  return (
+    <div className="panel border-l-2 border-accent-yellow">
+      <button onClick={() => setOpen((v) => !v)} className="flex items-center gap-2 w-full text-left">
+        <AlertTriangle size={14} className="text-accent-yellow flex-shrink-0" />
+        <span className="text-sm font-medium text-text-primary flex-1">Import Warnings ({warnings.length})</span>
+        {open ? <ChevronDown size={14} className="text-text-muted" /> : <ChevronRight size={14} className="text-text-muted" />}
+      </button>
+      {open && (
+        <div className="mt-3 space-y-2">
+          {warnings.map((w, i) => (
+            <div key={i} className="bg-surface-2 rounded p-2.5 flex items-start gap-2">
+              <span className="tag tag-yellow mt-0.5 flex-shrink-0">{w.code}</span>
+              <p className="text-xs text-text-secondary">{w.message}</p>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ConfidenceBar({ value }: { value: number }) {
+  const pct = Math.round(value * 100);
+  const colorClass = pct >= 80 ? "bg-accent-green" : pct >= 60 ? "bg-accent-yellow" : "bg-accent-red";
+  return (
+    <div className="flex items-center gap-2">
+      <div className="flex-1 h-1.5 bg-surface-3 rounded-full overflow-hidden">
+        <div className={clsx("h-full rounded-full", colorClass)} style={{ width: `${pct}%` }} />
+      </div>
+      <span className="text-xs tabular-nums text-text-muted w-8 text-right">{pct}%</span>
+    </div>
+  );
+}
+
+function HuntingRuleCandidateCard({ candidate }: { candidate: HuntingRuleCandidate }) {
+  const [expanded, setExpanded] = useState(false);
+  const { binary } = candidate;
+  const primaryLabel =
+    candidate.ruleType === "publisher-scoped" || candidate.ruleType === "publisher"
+      ? binary.signerNames[0] ?? "Unknown publisher"
+      : candidate.ruleType === "hash"
+      ? (binary.sha256?.substring(0, 32) ?? binary.sha1?.substring(0, 32) ?? "—") + "…"
+      : binary.filePaths[0] ?? binary.fileNames[0] ?? "—";
+
+  return (
+    <div className="panel">
+      <div className="flex items-start gap-2">
+        <div className="flex items-center gap-1.5 flex-shrink-0 mt-0.5">
+          <span className={clsx("tag flex items-center gap-1", riskClass(candidate.risk))}>{ruleTypeIcon(candidate.ruleType)}{ruleTypeLabel(candidate.ruleType)}</span>
+          <span className={clsx("tag", riskClass(candidate.risk))}>{candidate.risk}</span>
+          <span className={clsx("tag", candidate.effect === "Allow" ? "tag-green" : "tag-red")}>{candidate.effect}</span>
+          {candidate.appliesToKernelMode && <span className="tag tag-orange" title="Kernel-mode driver">KM</span>}
+        </div>
+        <div className="flex-1 min-w-0 ml-1">
+          <p className="text-sm font-medium text-text-primary truncate">{primaryLabel}</p>
+          {binary.fileNames.length > 0 && candidate.ruleType !== "path" && candidate.ruleType !== "path-wildcard" && (
+            <p className="text-xs text-text-muted mt-0.5 truncate">
+              {binary.fileNames.slice(0, 2).join(", ")}{binary.fileNames.length > 2 ? ` +${binary.fileNames.length - 2} more` : ""}
+            </p>
+          )}
+        </div>
+        <div className="flex items-center gap-3 flex-shrink-0 ml-2">
+          <div className="text-right">
+            <div className="flex items-center gap-1 text-xs text-text-muted mb-1">
+              <Server size={10} /><span>{binary.deviceNames.length} device{binary.deviceNames.length !== 1 ? "s" : ""}</span>
+              <span className="ml-1">· {binary.observationCount} obs.</span>
+            </div>
+            <div className="w-28"><ConfidenceBar value={candidate.confidence} /></div>
+          </div>
+          <button onClick={() => setExpanded((v) => !v)} className="p-1 rounded hover:bg-surface-3 transition-colors" aria-label={expanded ? "Collapse" : "Expand"}>
+            {expanded ? <ChevronDown size={14} className="text-text-muted" /> : <ChevronRight size={14} className="text-text-muted" />}
+          </button>
+        </div>
+      </div>
+      <p className="text-xs text-text-muted mt-2 leading-relaxed">{candidate.rationale}</p>
+      {expanded && (
+        <div className="mt-4 pt-4 border-t border-border space-y-4">
+          <div>
+            <p className="section-header mb-2">WDAC Rule Attributes</p>
+            <div className="bg-surface-2 rounded p-3 space-y-1.5">
+              {Object.entries(candidate.wdacAttributes).map(([k, v]) => (
+                <div key={k} className="flex gap-2 text-xs">
+                  <span className="text-text-muted w-36 flex-shrink-0">{k}</span>
+                  <span className="text-text-primary font-mono break-all">{v}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div>
+            <p className="section-header mb-2">Binary Details</p>
+            <div className="bg-surface-2 rounded p-3 grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
+              {binary.sha256 && <><span className="text-text-muted">SHA256</span><span className="text-text-primary font-mono break-all">{binary.sha256}</span></>}
+              {binary.sha1 && <><span className="text-text-muted">SHA1</span><span className="text-text-primary font-mono break-all">{binary.sha1}</span></>}
+              {binary.fileNames.length > 0 && <><span className="text-text-muted">File Name(s)</span><span className="text-text-primary">{binary.fileNames.join(", ")}</span></>}
+              {binary.folderPaths.length > 0 && <><span className="text-text-muted">Folder Path(s)</span><span className="text-text-primary break-all">{binary.folderPaths.slice(0, 3).join(", ")}{binary.folderPaths.length > 3 ? ` +${binary.folderPaths.length - 3} more` : ""}</span></>}
+              {binary.issuerNames.length > 0 && <><span className="text-text-muted">Issuer</span><span className="text-text-primary">{binary.issuerNames[0]}</span></>}
+              <span className="text-text-muted">Signing Coverage</span>
+              <span className={clsx("tag w-fit", coverageClass(binary.signingCoverage))}>{binary.signingCoverage}</span>
+              {binary.firstSeen && <><span className="text-text-muted">First / Last Seen</span><span className="text-text-primary">{binary.firstSeen.substring(0, 10)}{binary.lastSeen && binary.lastSeen !== binary.firstSeen ? ` → ${binary.lastSeen.substring(0, 10)}` : ""}</span></>}
+            </div>
+          </div>
+          {binary.deviceNames.length > 0 && (
+            <div>
+              <p className="section-header mb-2">Devices Observed ({binary.deviceNames.length})</p>
+              <div className="flex flex-wrap gap-1">
+                {binary.deviceNames.slice(0, 20).map((d) => <span key={d} className="tag tag-gray text-xs">{d}</span>)}
+                {binary.deviceNames.length > 20 && <span className="tag tag-gray text-xs">+{binary.deviceNames.length - 20} more</span>}
+              </div>
+            </div>
+          )}
+          {candidate.warnings.length > 0 && (
+            <div>
+              <p className="section-header mb-2">Data Quality Warnings</p>
+              <div className="space-y-1.5">
+                {candidate.warnings.map((w, i) => (
+                  <div key={i} className="flex items-start gap-2 text-xs text-accent-yellow">
+                    <AlertTriangle size={12} className="flex-shrink-0 mt-0.5" /><span className="text-text-secondary">{w}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const PAGE_SIZE = 50;
+
+function BinaryInventory({ binaries }: { binaries: HuntingBinary[] }) {
+  const [page, setPage] = useState(0);
+  const pageCount = Math.ceil(binaries.length / PAGE_SIZE);
+  const visible = binaries.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+  return (
+    <div className="space-y-2">
+      <div className="overflow-x-auto rounded border border-border">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="border-b border-border bg-surface-2">
+              {["File Name(s)", "Coverage", "SHA256", "Publisher", "Devices", "Obs."].map((h) => (
+                <th key={h} className="text-left px-3 py-2 text-text-muted font-medium whitespace-nowrap">{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {visible.map((binary) => (
+              <tr key={binary.key} className="border-b border-border hover:bg-surface-2 transition-colors">
+                <td className="px-3 py-2 text-text-primary max-w-[200px]"><span className="truncate block" title={binary.fileNames.join(", ")}>{binary.fileNames.slice(0, 2).join(", ") || "—"}{binary.fileNames.length > 2 ? ` +${binary.fileNames.length - 2}` : ""}</span></td>
+                <td className="px-3 py-2 whitespace-nowrap"><span className={clsx("tag", coverageClass(binary.signingCoverage))}>{binary.signingCoverage}</span></td>
+                <td className="px-3 py-2 font-mono text-text-muted max-w-[160px]"><span className="truncate block" title={binary.sha256 ?? undefined}>{binary.sha256 ? binary.sha256.substring(0, 20) + "…" : "—"}</span></td>
+                <td className="px-3 py-2 text-text-secondary max-w-[200px]"><span className="truncate block" title={binary.signerNames[0]}>{binary.signerNames[0] ?? "—"}</span></td>
+                <td className="px-3 py-2 text-text-muted tabular-nums text-center">{binary.deviceNames.length}</td>
+                <td className="px-3 py-2 text-text-muted tabular-nums text-center">{binary.observationCount}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {pageCount > 1 && (
+        <div className="flex items-center justify-between text-xs text-text-muted">
+          <span>{page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, binaries.length)} of {binaries.length}</span>
+          <div className="flex gap-1">
+            <button onClick={() => setPage((p) => Math.max(0, p - 1))} disabled={page === 0} className="px-2 py-1 rounded border border-border hover:bg-surface-2 disabled:opacity-40">←</button>
+            <button onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))} disabled={page === pageCount - 1} className="px-2 py-1 rounded border border-border hover:bg-surface-2 disabled:opacity-40">→</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SchemaReferencePanel() {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="panel">
+      <button onClick={() => setOpen((v) => !v)} className="flex items-center gap-2 w-full text-left">
+        <HelpCircle size={14} className="text-text-muted" />
+        <span className="text-sm font-medium text-text-primary flex-1">Supported Defender Tables & Field Mapping</span>
+        {open ? <ChevronDown size={14} className="text-text-muted" /> : <ChevronRight size={14} className="text-text-muted" />}
+      </button>
+      {open && (
+        <div className="mt-4 space-y-4 text-xs text-text-secondary">
+          <div>
+            <p className="font-medium text-text-primary mb-2">Recognised Defender Tables</p>
+            <div className="space-y-2">
+              {[
+                { name: "DeviceFileCertificateInfo", key: "SubjectName, IsSigned, SHA256", note: "Certificate-centric. Best source for publisher data. No FileName/FolderPath." },
+                { name: "DeviceFileEvents",          key: "FileName, FolderPath, SHA256",  note: "File creation/modification events. Good for path and hash context." },
+                { name: "DeviceProcessEvents",       key: "FileName, FolderPath, SHA256",  note: "Process launch events. Covers executables loaded by users and services." },
+                { name: "DeviceImageLoadEvents",     key: "FileName, FolderPath, SHA256",  note: "DLL and kernel driver load events. Relevant for driver policy." },
+              ].map((t) => (
+                <div key={t.name} className="bg-surface-2 rounded p-2.5">
+                  <p className="font-mono font-medium text-text-primary">{t.name}</p>
+                  <p className="text-text-muted mt-0.5">Key columns: {t.key}</p>
+                  <p className="mt-0.5">{t.note}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div>
+            <p className="font-medium text-text-primary mb-2">Field Aliases (Generic Fallback)</p>
+            <div className="bg-surface-2 rounded p-2.5 font-mono space-y-1">
+              {[
+                ["SHA256",     "SHA256 · Sha256 · FileHashSHA256 · Hash"],
+                ["Signer",     "SubjectName · SignerName · Publisher · PublisherName · CertSubject"],
+                ["Issuer",     "IssuerName · Issuer · CertIssuer · CertificateIssuerName"],
+                ["FileName",   "FileName · ProcessImageName · ImageName"],
+                ["FolderPath", "FolderPath · DirectoryPath · Directory"],
+                ["DeviceName", "DeviceName · ComputerName · HostName · MachineName"],
+                ["Timestamp",  "Timestamp · EventTime · TimeGenerated · CreatedTime"],
+              ].map(([field, aliases]) => (
+                <div key={field} className="grid grid-cols-[100px_1fr] gap-2">
+                  <span className="text-text-muted">{field}</span>
+                  <span className="text-text-secondary">{aliases}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div>
+            <p className="font-medium text-text-primary mb-2">JSON Export Formats</p>
+            <p>Three formats are accepted automatically:</p>
+            <ul className="mt-1 space-y-0.5 list-disc list-inside">
+              <li>Direct array: <code className="font-mono">{"[{...}, ...]"}</code></li>
+              <li>Results wrapper: <code className="font-mono">{'{ "Results": [...] }'}</code></li>
+              <li>Columnar: <code className="font-mono">{'{ "schema": [...], "rows": [[...]] }'}</code></li>
+            </ul>
+          </div>
+          <div>
+            <p className="font-medium text-text-primary mb-2">Recommended KQL Pattern</p>
+            <pre className="bg-surface-2 rounded p-3 text-xs font-mono overflow-x-auto leading-relaxed">{`DeviceFileEvents
+| where Timestamp > ago(7d)
+| project SHA256, FileName, FolderPath, DeviceName, Timestamp
+| join kind=leftouter (
+    DeviceFileCertificateInfo
+    | project SHA256, SubjectName, IssuerName, IsSigned
+) on SHA256
+| summarize
+    FileName=any(FileName), FolderPath=any(FolderPath),
+    SubjectName=any(SubjectName), IssuerName=any(IssuerName),
+    IsSigned=any(IsSigned), Devices=dcount(DeviceName), Timestamp=min(Timestamp)
+  by SHA256
+| export to csv`}</pre>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+interface CandidateFilters { ruleType: HuntingRuleType | "all"; risk: HuntingRuleRisk | "all"; effect: "Allow" | "Deny" | "all"; }
+
+function filterCandidates(candidates: HuntingRuleCandidate[], filters: CandidateFilters): HuntingRuleCandidate[] {
+  const riskOrder: Record<HuntingRuleRisk, number> = { critical: 5, high: 4, medium: 3, low: 2, safe: 1 };
+  return candidates
+    .filter((c) => filters.ruleType === "all" || c.ruleType === filters.ruleType)
+    .filter((c) => filters.risk === "all" || c.risk === filters.risk)
+    .filter((c) => filters.effect === "all" || c.effect === filters.effect)
+    .sort((a, b) => { const dr = riskOrder[b.risk] - riskOrder[a.risk]; return dr !== 0 ? dr : b.confidence - a.confidence; });
+}
+
+const RISK_LEVELS: Array<HuntingRuleRisk | "all"> = ["all", "safe", "low", "medium", "high", "critical"];
+const RULE_TYPES: Array<HuntingRuleType | "all"> = ["all", "publisher-scoped", "publisher", "hash", "path", "path-wildcard"];
+
+function AdvancedHuntingTab() {
+  const [fileName, setFileName] = useState<string | null>(null);
+  const [format, setFormat] = useState<"auto" | "json" | "csv">("auto");
+  const [preferPublisher, setPreferPublisher] = useState(true);
+  const [scopePublisher, setScopePublisher] = useState(true);
+  const [includePathRules, setIncludePathRules] = useState(false);
+  const [effect, setEffect] = useState<"Allow" | "Deny">("Allow");
+  const [activeResultTab, setActiveResultTab] = useState<"candidates" | "inventory">("candidates");
+  const [filters, setFilters] = useState<CandidateFilters>({ ruleType: "all", risk: "all", effect: "all" });
+
+  const mutation = useMutation({
+    mutationFn: (content: string) =>
+      policyApi.ingestAdvancedHunting({ format, content, preferPublisherRules: preferPublisher, scopePublisherRules: scopePublisher, includePathRules, effect }),
+  });
+
+  const result = mutation.data;
+  const filteredCandidates = result ? filterCandidates(result.ruleCandidates, filters) : [];
+
+  return (
+    <div className="flex-1 overflow-y-auto p-6 space-y-4">
+      <p className="text-xs text-text-muted">
+        Convert Microsoft Defender Advanced Hunting query results into WDAC rule candidates.
+        Supports DeviceFileCertificateInfo, DeviceFileEvents, DeviceProcessEvents, DeviceImageLoadEvents and generic column exports.
+      </p>
+
+      <div className="grid grid-cols-[1fr_320px] gap-4">
+        <div className="panel space-y-4">
+          <p className="text-xs font-medium text-text-secondary uppercase tracking-wider">Ingestion Options</p>
+          <div>
+            <p className="text-xs text-text-muted mb-1.5">Input Format</p>
+            <div className="flex gap-1.5">
+              {(["auto", "json", "csv"] as const).map((f) => (
+                <button key={f} onClick={() => setFormat(f)}
+                  className={clsx("px-3 py-1 rounded text-xs border transition-colors",
+                    format === f ? "border-accent-blue bg-accent-blue-dim text-accent-blue" : "border-border text-text-secondary hover:border-accent-blue hover:text-text-primary")}>
+                  {f.toUpperCase()}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <p className="text-xs text-text-muted mb-1.5">Rule Effect</p>
+            <div className="flex gap-1.5">
+              {(["Allow", "Deny"] as const).map((e) => (
+                <button key={e} onClick={() => setEffect(e)}
+                  className={clsx("px-3 py-1 rounded text-xs border transition-colors",
+                    effect === e
+                      ? e === "Allow" ? "border-accent-green bg-accent-green-dim text-accent-green" : "border-accent-red bg-accent-red-dim text-accent-red"
+                      : "border-border text-text-secondary hover:text-text-primary")}>
+                  {e}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="space-y-2">
+            {[
+              { label: "Prefer publisher rules",           detail: "Use CertPublisher rules where signing data is available.", value: preferPublisher, set: setPreferPublisher },
+              { label: "Scope publisher rules to FileName", detail: "Add FileAttrib scoping when FileName is consistent across all observations.", value: scopePublisher, set: setScopePublisher, disabled: !preferPublisher },
+              { label: "Include path rules for no-hash binaries", detail: "Generate FilePath rules for binaries with no SHA256. Higher risk — use with caution.", value: includePathRules, set: setIncludePathRules },
+            ].map(({ label, detail, value, set, disabled }) => (
+              <label key={label} className={clsx("flex items-start gap-3 cursor-pointer", disabled && "opacity-50 cursor-not-allowed")}>
+                <div className="flex-shrink-0 mt-0.5">
+                  <div onClick={() => !disabled && set(!value)}
+                    className={clsx("w-8 h-4 rounded-full transition-colors relative", value && !disabled ? "bg-accent-blue" : "bg-surface-3")}>
+                    <div className={clsx("absolute top-0.5 w-3 h-3 rounded-full bg-white shadow transition-transform", value && !disabled ? "translate-x-4" : "translate-x-0.5")} />
+                  </div>
+                </div>
+                <div>
+                  <p className="text-xs font-medium text-text-primary">{label}</p>
+                  <p className="text-xs text-text-muted mt-0.5">{detail}</p>
+                </div>
+              </label>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-3">
+          <HuntingFileDropZone label="Drop Advanced Hunting export here" onFile={(content, name) => { setFileName(name); mutation.mutate(content); }} />
+          {fileName && (
+            <div className="flex items-center gap-2 px-3 py-2 bg-surface-2 rounded text-xs">
+              <Eye size={12} className="text-text-muted" /><span className="text-text-secondary truncate" title={fileName}>{fileName}</span>
+            </div>
+          )}
+          {mutation.isPending && (
+            <div className="flex items-center gap-2 text-xs text-text-muted px-1">
+              <div className="w-3 h-3 border border-accent-blue border-t-transparent rounded-full animate-spin" />Ingesting…
+            </div>
+          )}
+          {mutation.isError && (
+            <div className="flex items-start gap-2 text-xs text-accent-red px-1">
+              <AlertTriangle size={12} className="flex-shrink-0 mt-0.5" /><span>{(mutation.error as Error).message}</span>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {result && (
+        <>
+          <HuntingStatsBar result={result} />
+          <HuntingWarningsPanel warnings={result.warnings} />
+          <div>
+            <div className="flex items-center border-b border-border mb-4">
+              {([{ key: "candidates" as const, label: `Rule Candidates (${result.ruleCandidates.length})` }, { key: "inventory" as const, label: `Binary Inventory (${result.binaries.length})` }]).map(({ key, label }) => (
+                <button key={key} onClick={() => setActiveResultTab(key)}
+                  className={clsx("px-4 py-2 text-sm border-b-2 -mb-px transition-colors",
+                    activeResultTab === key ? "border-accent-blue text-text-primary font-medium" : "border-transparent text-text-secondary hover:text-text-primary")}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            {activeResultTab === "candidates" && (
+              <div className="space-y-4">
+                <div className="flex flex-wrap items-center gap-3 p-3 bg-surface-1 border border-border rounded">
+                  {([["ruleType", RULE_TYPES, "All types", (t: string) => t === "all" ? "All types" : ruleTypeLabel(t as HuntingRuleType)] as const,
+                     ["risk",     RISK_LEVELS, "All risks",  (r: string) => r === "all" ? "All risks" : r] as const,
+                  ] as const).map(([key, opts, placeholder, labelFn]) => (
+                    <div key={key} className="flex items-center gap-2 text-xs">
+                      <span className="text-text-muted capitalize">{key === "ruleType" ? "Type" : key.charAt(0).toUpperCase() + key.slice(1)}:</span>
+                      <select value={filters[key as keyof CandidateFilters]}
+                        onChange={(e) => setFilters((f) => ({ ...f, [key]: e.target.value }))}
+                        className="bg-surface-2 border border-border rounded px-2 py-1 text-text-primary focus:outline-none focus:border-accent-blue">
+                        {opts.map((o) => <option key={o} value={o}>{labelFn(o)}</option>)}
+                      </select>
+                    </div>
+                  ))}
+                  <div className="flex items-center gap-2 text-xs">
+                    <span className="text-text-muted">Effect:</span>
+                    <select value={filters.effect} onChange={(e) => setFilters((f) => ({ ...f, effect: e.target.value as CandidateFilters["effect"] }))}
+                      className="bg-surface-2 border border-border rounded px-2 py-1 text-text-primary focus:outline-none focus:border-accent-blue">
+                      <option value="all">All</option><option value="Allow">Allow</option><option value="Deny">Deny</option>
+                    </select>
+                  </div>
+                  {filteredCandidates.length !== result.ruleCandidates.length && (
+                    <span className="text-xs text-text-muted ml-auto">{filteredCandidates.length} of {result.ruleCandidates.length} shown</span>
+                  )}
+                </div>
+                {filteredCandidates.length === 0
+                  ? <div className="text-center py-12 text-text-muted"><CheckCircle size={32} className="mx-auto mb-2 opacity-30" /><p className="text-sm">No candidates match the current filters.</p></div>
+                  : <div className="space-y-2">{filteredCandidates.map((c) => <HuntingRuleCandidateCard key={c.id} candidate={c} />)}</div>}
+              </div>
+            )}
+            {activeResultTab === "inventory" && <BinaryInventory binaries={result.binaries} />}
+          </div>
+        </>
+      )}
+      <SchemaReferencePanel />
+    </div>
+  );
+}
+
+// ===========================================================================
+// BUILD POLICY TAB
+// ===========================================================================
+
+type Template = "default-windows" | "allow-microsoft" | "deny-by-default" | "blank";
+
+const TEMPLATES: { id: Template; label: string; description: string }[] = [
+  { id: "blank",           label: "Blank",           description: "Start with minimal options; only rules you define apply." },
+  { id: "allow-microsoft", label: "Allow Microsoft", description: "Trust Microsoft-signed binaries. Add more rules for other software." },
+  { id: "default-windows", label: "Default Windows", description: "Allow Windows components + WHQL drivers. Most restrictive template." },
+  { id: "deny-by-default", label: "Deny by Default", description: "Explicit allow-list only. Requires EV signers." },
+];
+
+function Toggle({ label, description, checked, onChange, warning }: { label: string; description: string; checked: boolean; onChange: (v: boolean) => void; warning?: boolean }) {
+  return (
+    <div className="flex items-start gap-3">
+      <button role="switch" aria-checked={checked} onClick={() => onChange(!checked)}
+        className={clsx("relative inline-flex w-9 h-5 rounded-full flex-shrink-0 mt-0.5 transition-colors focus:outline-none focus:ring-2 focus:ring-accent-blue focus:ring-offset-2 focus:ring-offset-surface-1",
+          checked ? "bg-accent-blue" : "bg-surface-5")}>
+        <span className={clsx("inline-block w-3.5 h-3.5 rounded-full bg-white shadow transform transition-transform mt-0.5 ml-0.5", checked ? "translate-x-4" : "translate-x-0")} />
+      </button>
+      <div className="flex-1">
+        <p className={clsx("text-xs font-medium", warning ? "text-accent-yellow" : "text-text-primary")}>{label}</p>
+        <p className="text-xs text-text-muted mt-0.5">{description}</p>
+      </div>
+    </div>
+  );
+}
+
+function BuildResult({ result }: { result: CreatePolicyFromEventsResponse }) {
+  return (
+    <div className="card p-4">
+      <div className="flex items-center gap-2 mb-3">
+        <CheckCircle size={16} className="text-accent-green" />
+        <h2 className="text-sm font-semibold text-text-primary">Policy Built Successfully</h2>
+      </div>
+      <div className="grid grid-cols-3 gap-3 mb-4 text-center">
+        <div className="bg-surface-2 rounded p-2"><p className="text-lg font-bold mono text-text-primary">{result.ruleCount}</p><p className="text-xs text-text-muted">Total Rules</p></div>
+        <div className="bg-surface-2 rounded p-2"><p className="text-lg font-bold mono text-accent-blue">{result.policy.fileRules.length}</p><p className="text-xs text-text-muted">File Rules</p></div>
+        <div className="bg-surface-2 rounded p-2"><p className="text-lg font-bold mono text-accent-purple">{result.policy.signers.length}</p><p className="text-xs text-text-muted">Signer Rules</p></div>
+      </div>
+      <h3 className="section-header">Build Log</h3>
+      <div className="bg-surface-2 rounded p-3 max-h-48 overflow-auto">
+        {result.buildLog.map((line, i) => <p key={i} className="mono text-xs text-text-muted">{line}</p>)}
+      </div>
+      <div className="mt-4 flex gap-2">
+        <button className="btn-primary" onClick={() => {
+          const blob = new Blob([result.xml], { type: "text/xml" });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a"); a.href = url; a.download = `${result.policy.friendlyName ?? "policy"}.xml`; a.click();
+          URL.revokeObjectURL(url);
+        }}>Download XML</button>
+        <p className="text-xs text-text-muted self-center">Policy has been loaded into the editor</p>
+      </div>
+    </div>
+  );
+}
+
+function BuildPolicyTab({ onSwitchToCiEvents }: { onSwitchToCiEvents: () => void }) {
+  const { importedEvents, addSession } = useAppStore();
+  const [options, setOptions] = useState({ policyName: "Generated Policy", template: "blank" as Template, preferPublisherRules: true, includePathRules: false, auditMode: true });
+  const [result, setResult] = useState<CreatePolicyFromEventsResponse | null>(null);
+
+  const buildMutation = useMutation({
+    mutationFn: () => policyApi.fromEvents({ events: importedEvents, policyName: options.policyName, template: options.template, preferPublisherRules: options.preferPublisherRules, includePathRules: options.includePathRules, auditMode: options.auditMode }),
+    onSuccess: (data) => { setResult(data); addSession({ id: uuidv4(), fileName: `${options.policyName}.xml`, policy: data.policy, xml: data.xml, loadedAt: new Date().toISOString() }); },
+  });
+
+  if (importedEvents.length === 0) {
+    return (
+      <div className="flex-1 flex items-center justify-center">
+        <div className="text-center">
+          <Activity size={40} className="mx-auto mb-3 text-text-muted opacity-40" />
+          <p className="text-sm font-medium text-text-secondary mb-1">No events loaded</p>
+          <p className="text-xs text-text-muted mb-4">Import CodeIntegrity events first, then return here to build a policy.</p>
+          <button className="btn-primary" onClick={onSwitchToCiEvents}>Go to CI Events</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex-1 overflow-auto p-6">
+      <div className="max-w-2xl space-y-5">
+        <div className="flex items-center justify-between">
+          <p className="text-xs text-text-muted">{importedEvents.length} events available</p>
+          <button className="btn-primary" onClick={() => buildMutation.mutate()} disabled={buildMutation.isPending || !options.policyName.trim()}>
+            <Activity size={13} />{buildMutation.isPending ? "Building..." : "Build Policy"}
+          </button>
+        </div>
+        <div className="card p-4">
+          <h2 className="section-header">Policy Settings</h2>
+          <div className="space-y-3">
+            <div>
+              <label className="text-xs font-medium text-text-secondary block mb-1.5">Policy Name</label>
+              <input className="input" value={options.policyName} onChange={(e) => setOptions((o) => ({ ...o, policyName: e.target.value }))} placeholder="My WDAC Policy" maxLength={256} />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-text-secondary block mb-2">Base Template</label>
+              <div className="grid grid-cols-2 gap-2">
+                {TEMPLATES.map((t) => (
+                  <button key={t.id} onClick={() => setOptions((o) => ({ ...o, template: t.id }))}
+                    className={clsx("text-left p-3 rounded border text-xs transition-colors", options.template === t.id ? "border-accent-blue bg-accent-blue-dim/20" : "border-border hover:border-border-strong")}>
+                    <p className="font-medium text-text-primary mb-0.5">{t.label}</p>
+                    <p className="text-text-muted">{t.description}</p>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className="card p-4">
+          <h2 className="section-header">Rule Generation</h2>
+          <div className="space-y-3">
+            <Toggle label="Prefer Publisher Rules" description="When signer info is available, create certificate publisher rules instead of hash rules. Publisher rules are more maintainable across software updates." checked={options.preferPublisherRules} onChange={(v) => setOptions((o) => ({ ...o, preferPublisherRules: v }))} />
+            <Toggle label="Include Path Rules" description="Add file path-based allow rules. Use with caution — path rules are weaker than hash or publisher rules and can be bypassed by placing malicious files at the same path." checked={options.includePathRules} onChange={(v) => setOptions((o) => ({ ...o, includePathRules: v }))} warning />
+            <Toggle label="Start in Audit Mode" description="Generate the policy with Enabled:Audit Mode (Option 3). Recommended for initial testing — deploy in audit mode, verify no legitimate software is blocked, then switch to enforcement." checked={options.auditMode} onChange={(v) => setOptions((o) => ({ ...o, auditMode: v }))} />
+          </div>
+        </div>
+        <div className="card p-4">
+          <h2 className="section-header">Event Inputs</h2>
+          <div className="grid grid-cols-3 gap-3 text-center">
+            <div className="bg-surface-2 rounded p-2"><p className="text-xl font-bold mono text-text-primary">{importedEvents.length}</p><p className="text-xs text-text-muted">Total Events</p></div>
+            <div className="bg-surface-2 rounded p-2"><p className="text-xl font-bold mono text-accent-red">{importedEvents.filter((e) => e.severity === "block").length}</p><p className="text-xs text-text-muted">Block Events</p></div>
+            <div className="bg-surface-2 rounded p-2"><p className="text-xl font-bold mono text-accent-yellow">{importedEvents.filter((e) => e.severity === "audit").length}</p><p className="text-xs text-text-muted">Audit Events</p></div>
+          </div>
+        </div>
+        {buildMutation.isPending && <div className="flex justify-center py-8"><LoadingSpinner label="Building policy rules..." /></div>}
+        {buildMutation.isError && (
+          <div className="p-4 bg-accent-red-dim/30 border border-accent-red/20 rounded text-sm text-accent-red flex items-center gap-2">
+            <AlertCircle size={14} />{(buildMutation.error as Error).message}
+          </div>
+        )}
+        {result && !buildMutation.isPending && <BuildResult result={result} />}
+      </div>
+    </div>
+  );
+}
+
+// ===========================================================================
+// MAIN PAGE
+// ===========================================================================
+
+const TABS: { key: PageTab; label: string; icon: React.ReactNode }[] = [
+  { key: "ci-events",        label: "CI Events",        icon: <Upload size={13} /> },
+  { key: "advanced-hunting", label: "Advanced Hunting", icon: <Search size={13} /> },
+  { key: "build-policy",     label: "Build Policy",     icon: <Activity size={13} /> },
+];
+
+export function ImportEventsPage() {
+  const [activeTab, setActiveTab] = useState<PageTab>("ci-events");
+
+  return (
+    <div className="flex flex-col h-full overflow-hidden">
+      <Header title="Import & Build" subtitle="Import CodeIntegrity events and Advanced Hunting results, then build a WDAC policy" />
+
+      <div className="border-b border-border px-6 flex-shrink-0">
+        <div className="flex">
+          {TABS.map(({ key, label, icon }) => (
+            <button key={key} onClick={() => setActiveTab(key)}
+              className={clsx("flex items-center gap-1.5 px-4 py-2.5 text-sm border-b-2 -mb-px transition-colors",
+                activeTab === key ? "border-accent-blue text-text-primary font-medium" : "border-transparent text-text-secondary hover:text-text-primary")}>
+              <span className={activeTab === key ? "text-accent-blue" : "text-text-muted"}>{icon}</span>
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {activeTab === "ci-events"        && <CiEventsTab />}
+      {activeTab === "advanced-hunting" && <AdvancedHuntingTab />}
+      {activeTab === "build-policy"     && <BuildPolicyTab onSwitchToCiEvents={() => setActiveTab("ci-events")} />}
     </div>
   );
 }
