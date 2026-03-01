@@ -86,21 +86,21 @@ export function generateWdacXml(policy: WdacPolicy): string {
     lines.push("");
   }
 
-  // FileRules
+  // FileRules — required element per cipolicy.xsd; always emitted, may be empty
+  lines.push(`${indent(1)}<FileRules>`);
   if (policy.fileRules.length > 0) {
-    lines.push(`${indent(1)}<FileRules>`);
     lines.push(...generateFileRules(policy.fileRules));
-    lines.push(`${indent(1)}</FileRules>`);
-    lines.push("");
   }
+  lines.push(`${indent(1)}</FileRules>`);
+  lines.push("");
 
-  // Signers
+  // Signers — required element per cipolicy.xsd; always emitted, may be empty
+  lines.push(`${indent(1)}<Signers>`);
   if (policy.signers.length > 0) {
-    lines.push(`${indent(1)}<Signers>`);
     lines.push(...generateSigners(policy.signers));
-    lines.push(`${indent(1)}</Signers>`);
-    lines.push("");
   }
+  lines.push(`${indent(1)}</Signers>`);
+  lines.push("");
 
   // Signing Scenarios
   lines.push(`${indent(1)}<SigningScenarios>`);

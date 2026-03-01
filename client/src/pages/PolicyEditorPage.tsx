@@ -1,6 +1,6 @@
 import { useState, useCallback } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { Upload, FileText, Settings, List, Key, RefreshCw, Code } from "lucide-react";
+import { Upload, FileText, Settings, List, Key, RefreshCw, RotateCcw, Code, X } from "lucide-react";
 import { v4 as uuidv4 } from "uuid";
 import clsx from "clsx";
 import { policyApi } from "../lib/api.ts";
@@ -39,15 +39,45 @@ export function PolicyEditorPage() {
   // Dialog visibility
   const [showAddFileRule, setShowAddFileRule] = useState(false);
   const [showAddSigner, setShowAddSigner] = useState(false);
+  const [showLoadModal, setShowLoadModal] = useState(false);
 
-  // Parse policy from XML
+  // -------------------------------------------------------------------------
+  // Parse — adds a new session (stores raw XML for reload capability)
+  // -------------------------------------------------------------------------
+
   const parseMutation = useMutation({
     mutationFn: ({ xml, fileName }: { xml: string; fileName: string }) =>
       policyApi.parse(xml, fileName),
-    onSuccess: (data) => {
+    onSuccess: (data, variables) => {
       const id = uuidv4();
-      addSession({ id, fileName: data.policy.sourceFileName, policy: data.policy, loadedAt: new Date().toISOString() });
+      addSession({
+        id,
+        fileName: data.policy.sourceFileName,
+        policy: data.policy,
+        xml: variables.xml,       // store raw XML so Reload can re-parse it
+        loadedAt: new Date().toISOString(),
+      });
       setStatus({ type: "success", message: `Loaded: ${data.policy.friendlyName ?? data.policy.policyId}` });
+      setShowLoadModal(false);
+      explainMutation.mutate(data.policy);
+    },
+    onError: (err) => setStatus({ type: "error", message: (err as Error).message }),
+  });
+
+  // -------------------------------------------------------------------------
+  // Reload — re-parses the stored XML for the active session, discarding edits
+  // -------------------------------------------------------------------------
+
+  const reloadMutation = useMutation({
+    mutationFn: () => {
+      if (!activeSession?.xml) throw new Error("No stored XML to reload from.");
+      return policyApi.parse(activeSession.xml, activeSession.fileName ?? "policy.xml");
+    },
+    onSuccess: (data) => {
+      if (!activeSession) return;
+      updateSessionPolicy(activeSession.id, data.policy);
+      setXmlPreview(null);
+      setStatus({ type: "success", message: "Policy reloaded from original file — all edits discarded." });
       explainMutation.mutate(data.policy);
     },
     onError: (err) => setStatus({ type: "error", message: (err as Error).message }),
@@ -83,7 +113,7 @@ export function PolicyEditorPage() {
     if (!activeSession) return;
     // Removes the rule AND scrubs every cross-reference:
     //   signingScenarios[*].fileRuleRefs
-    //   signers[*].fileAttribRefs (if it was a fileAttrib rule)
+    //   signers[*].fileAttribRefs  (when deleted rule is a fileAttrib)
     //   allowedSigners[*].exceptDenyRuleIds
     //   deniedSigners[*].exceptAllowRuleIds
     updateSessionPolicy(activeSession.id, deleteFileRule(activeSession.policy, id));
@@ -126,6 +156,25 @@ export function PolicyEditorPage() {
         actions={
           activeSession ? (
             <div className="flex gap-2">
+              <button
+                className="btn-ghost"
+                onClick={() => setShowLoadModal(true)}
+                title="Load a different or new policy XML file"
+              >
+                <Upload size={13} />
+                Load Policy
+              </button>
+              {activeSession.xml && (
+                <button
+                  className="btn-ghost"
+                  onClick={() => reloadMutation.mutate()}
+                  disabled={reloadMutation.isPending}
+                  title="Re-parse original file — discards all current edits"
+                >
+                  <RotateCcw size={13} className={reloadMutation.isPending ? "animate-spin" : ""} />
+                  Reload File
+                </button>
+              )}
               <button
                 className="btn-ghost"
                 onClick={() => explainMutation.mutate(activeSession.policy)}
@@ -285,7 +334,49 @@ export function PolicyEditorPage() {
         </div>
       )}
 
-      {/* Dialogs — rendered outside the tab layout to avoid z-index issues */}
+      {/* ------------------------------------------------------------------ */}
+      {/* Load Policy modal                                                   */}
+      {/* ------------------------------------------------------------------ */}
+      {showLoadModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="bg-surface-1 border border-border rounded-lg w-full max-w-md shadow-2xl">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+              <div>
+                <h2 className="text-sm font-semibold text-text-primary">Load Policy</h2>
+                <p className="text-xs text-text-muted mt-0.5">
+                  Loads a new policy as an additional session — use the sidebar to switch between loaded policies.
+                </p>
+              </div>
+              <button
+                onClick={() => setShowLoadModal(false)}
+                className="text-text-muted hover:text-text-primary transition-colors ml-4 flex-shrink-0"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="p-5">
+              {parseMutation.isPending ? (
+                <LoadingSpinner label="Parsing policy XML..." />
+              ) : (
+                <FileDropZone
+                  accept=".xml"
+                  label="Drop WDAC Policy XML"
+                  description=".xml files from New-CIPolicy, PolicyStore, or this editor"
+                  onFile={handleFile}
+                />
+              )}
+              {parseMutation.isError && (
+                <div className="mt-3 p-3 bg-accent-red/10 border border-accent-red/20 rounded text-xs text-accent-red">
+                  {(parseMutation.error as Error).message}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add File Rule dialog */}
       {showAddFileRule && activeSession && (
         <AddFileRuleDialog
           policy={activeSession.policy}
@@ -294,6 +385,7 @@ export function PolicyEditorPage() {
         />
       )}
 
+      {/* Add Signer dialog */}
       {showAddSigner && activeSession && (
         <AddSignerDialog
           policy={activeSession.policy}
