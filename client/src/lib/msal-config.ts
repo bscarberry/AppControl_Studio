@@ -48,7 +48,6 @@ if (isMsalEnabled) {
       // sessionStorage is cleared when the browser tab closes — safer for
       // security-sensitive tooling than localStorage.
       cacheLocation: "sessionStorage",
-      storeAuthStateInCookie: false,
     },
   };
   _msalInstance = new PublicClientApplication(config);

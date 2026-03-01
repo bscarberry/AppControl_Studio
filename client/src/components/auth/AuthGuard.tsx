@@ -26,10 +26,11 @@ export function AuthGuard({ children }: AuthGuardProps) {
 
   // While a login/logout interaction is in flight, show a neutral loading
   // screen instead of flashing the sign-in page.
+  // msal-browser v5 removed InteractionStatus.Login; login interactions
+  // now surface as AcquireToken.
   if (
     !isAuthenticated &&
-    (inProgress === InteractionStatus.Login ||
-      inProgress === InteractionStatus.HandleRedirect ||
+    (inProgress === InteractionStatus.HandleRedirect ||
       inProgress === InteractionStatus.AcquireToken)
   ) {
     return (
