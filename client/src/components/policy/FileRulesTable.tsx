@@ -1,12 +1,13 @@
 import { useState } from "react";
 import type { WdacFileRule } from "@appcontrol/shared";
-import { Search, Hash, FolderOpen, Package, Tag } from "lucide-react";
+import { Search, Hash, FolderOpen, Package, Tag, Plus, Trash2 } from "lucide-react";
 import clsx from "clsx";
 
 interface FileRulesTableProps {
   rules: WdacFileRule[];
   editable?: boolean;
   onDelete?: (id: string) => void;
+  onAdd?: () => void;
 }
 
 type EffectFilter = "all" | "Allow" | "Deny" | "FileAttrib";
@@ -51,9 +52,10 @@ function countByFilter(rules: WdacFileRule[], filter: EffectFilter): number {
   return filter === "all" ? rules.length : rules.filter((r) => matchesEffectFilter(r, filter)).length;
 }
 
-export function FileRulesTable({ rules, editable, onDelete }: FileRulesTableProps) {
+export function FileRulesTable({ rules, editable, onDelete, onAdd }: FileRulesTableProps) {
   const [filter, setFilter] = useState("");
   const [effectFilter, setEffectFilter] = useState<EffectFilter>("all");
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   const filtered = rules.filter((r) => {
     if (!matchesEffectFilter(r, effectFilter)) return false;
@@ -66,6 +68,15 @@ export function FileRulesTable({ rules, editable, onDelete }: FileRulesTableProp
       value.toLowerCase().includes(q)
     );
   });
+
+  function handleDeleteClick(id: string) {
+    if (confirmDeleteId === id) {
+      onDelete?.(id);
+      setConfirmDeleteId(null);
+    } else {
+      setConfirmDeleteId(id);
+    }
+  }
 
   return (
     <div className="flex flex-col h-full">
@@ -93,12 +104,19 @@ export function FileRulesTable({ rules, editable, onDelete }: FileRulesTableProp
               )}
             >
               {t === "all" ? "All" : t}
-              <span className="ml-1 text-text-muted">
-                ({countByFilter(rules, t)})
-              </span>
+              <span className="ml-1 text-text-muted">({countByFilter(rules, t)})</span>
             </button>
           ))}
         </div>
+        {editable && onAdd && (
+          <button
+            onClick={onAdd}
+            className="btn-secondary text-xs flex-shrink-0 flex items-center gap-1.5"
+          >
+            <Plus size={12} />
+            Add Rule
+          </button>
+        )}
       </div>
 
       {/* Table */}
@@ -114,7 +132,7 @@ export function FileRulesTable({ rules, editable, onDelete }: FileRulesTableProp
                 <th>ID</th>
                 <th>Friendly Name</th>
                 <th>Value</th>
-                {editable && <th></th>}
+                {editable && <th className="w-28"></th>}
               </tr>
             </thead>
             <tbody>
@@ -122,11 +140,15 @@ export function FileRulesTable({ rules, editable, onDelete }: FileRulesTableProp
                 const { icon, label } = getRuleIcon(rule);
                 const effectLabel = getRuleEffectLabel(rule);
                 const value = getRuleValue(rule);
+                const pendingDelete = confirmDeleteId === rule.id;
 
                 return (
-                  <tr key={rule.id}>
+                  <tr
+                    key={rule.id}
+                    className={clsx(pendingDelete && "bg-accent-red/5")}
+                  >
                     <td>
-                      <span className={EFFECT_COLORS[effectLabel]}>{effectLabel}</span>
+                      <span className={clsx("tag", EFFECT_COLORS[effectLabel])}>{effectLabel}</span>
                     </td>
                     <td>
                       <span className="flex items-center gap-1 text-text-muted text-xs">
@@ -139,12 +161,31 @@ export function FileRulesTable({ rules, editable, onDelete }: FileRulesTableProp
                     <td className="mono text-xs max-w-xs truncate" title={value}>{value}</td>
                     {editable && (
                       <td>
-                        <button
-                          onClick={() => onDelete?.(rule.id)}
-                          className="text-xs text-text-muted hover:text-accent-red transition-colors"
-                        >
-                          Remove
-                        </button>
+                        {pendingDelete ? (
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              onClick={() => handleDeleteClick(rule.id)}
+                              className="text-xs text-accent-red font-medium transition-colors"
+                            >
+                              Confirm
+                            </button>
+                            <span className="text-text-muted">·</span>
+                            <button
+                              onClick={() => setConfirmDeleteId(null)}
+                              className="text-xs text-text-muted hover:text-text-secondary transition-colors"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => handleDeleteClick(rule.id)}
+                            className="text-text-muted hover:text-accent-red transition-colors p-1 rounded"
+                            title="Remove rule and all references"
+                          >
+                            <Trash2 size={12} />
+                          </button>
+                        )}
                       </td>
                     )}
                   </tr>

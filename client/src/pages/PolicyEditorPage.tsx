@@ -5,6 +5,7 @@ import { v4 as uuidv4 } from "uuid";
 import clsx from "clsx";
 import { policyApi } from "../lib/api.ts";
 import { useAppStore, useActiveSession } from "../store/index.ts";
+import { deleteFileRule, deleteSigner } from "../lib/policy-mutations.ts";
 import { Header } from "../components/layout/Header.tsx";
 import { FileDropZone } from "../components/common/FileDropZone.tsx";
 import { EmptyState } from "../components/common/EmptyState.tsx";
@@ -13,6 +14,8 @@ import { PolicyOverview } from "../components/policy/PolicyOverview.tsx";
 import { FileRulesTable } from "../components/policy/FileRulesTable.tsx";
 import { SignersTable } from "../components/policy/SignersTable.tsx";
 import { PolicyOptionsEditor } from "../components/policy/PolicyOptionsEditor.tsx";
+import { AddFileRuleDialog } from "../components/policy/AddFileRuleDialog.tsx";
+import { AddSignerDialog } from "../components/policy/AddSignerDialog.tsx";
 import type { WdacPolicy, ExplainPolicyResponse } from "@appcontrol/shared";
 
 type TabId = "overview" | "options" | "file-rules" | "signers" | "xml";
@@ -33,6 +36,10 @@ export function PolicyEditorPage() {
   const [xmlPreview, setXmlPreview] = useState<string | null>(null);
   const [status, setStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
 
+  // Dialog visibility
+  const [showAddFileRule, setShowAddFileRule] = useState(false);
+  const [showAddSigner, setShowAddSigner] = useState(false);
+
   // Parse policy from XML
   const parseMutation = useMutation({
     mutationFn: ({ xml, fileName }: { xml: string; fileName: string }) =>
@@ -41,7 +48,6 @@ export function PolicyEditorPage() {
       const id = uuidv4();
       addSession({ id, fileName: data.policy.sourceFileName, policy: data.policy, loadedAt: new Date().toISOString() });
       setStatus({ type: "success", message: `Loaded: ${data.policy.friendlyName ?? data.policy.policyId}` });
-      // Auto-explain
       explainMutation.mutate(data.policy);
     },
     onError: (err) => setStatus({ type: "error", message: (err as Error).message }),
@@ -66,18 +72,47 @@ export function PolicyEditorPage() {
   }, []);
 
   const handlePolicyChange = (updated: WdacPolicy) => {
-    if (activeSession) {
-      updateSessionPolicy(activeSession.id, updated);
-    }
+    if (activeSession) updateSessionPolicy(activeSession.id, updated);
   };
+
+  // -------------------------------------------------------------------------
+  // File rule handlers
+  // -------------------------------------------------------------------------
 
   const handleDeleteFileRule = (id: string) => {
     if (!activeSession) return;
-    const updated: WdacPolicy = {
-      ...activeSession.policy,
-      fileRules: activeSession.policy.fileRules.filter((r) => r.id !== id),
-    };
+    // Removes the rule AND scrubs every cross-reference:
+    //   signingScenarios[*].fileRuleRefs
+    //   signers[*].fileAttribRefs (if it was a fileAttrib rule)
+    //   allowedSigners[*].exceptDenyRuleIds
+    //   deniedSigners[*].exceptAllowRuleIds
+    updateSessionPolicy(activeSession.id, deleteFileRule(activeSession.policy, id));
+  };
+
+  const handleAddFileRule = (updated: WdacPolicy) => {
+    if (!activeSession) return;
     updateSessionPolicy(activeSession.id, updated);
+    setStatus({ type: "success", message: "File rule added." });
+  };
+
+  // -------------------------------------------------------------------------
+  // Signer handlers
+  // -------------------------------------------------------------------------
+
+  const handleDeleteSigner = (id: string) => {
+    if (!activeSession) return;
+    // Removes the signer AND scrubs every cross-reference:
+    //   signingScenarios[*].allowedSigners
+    //   signingScenarios[*].deniedSigners
+    //   policy.updatePolicySigners
+    //   policy.ciSigners
+    updateSessionPolicy(activeSession.id, deleteSigner(activeSession.policy, id));
+  };
+
+  const handleAddSigner = (updated: WdacPolicy) => {
+    if (!activeSession) return;
+    updateSessionPolicy(activeSession.id, updated);
+    setStatus({ type: "success", message: "Signer added." });
   };
 
   const isLoading = parseMutation.isPending;
@@ -187,11 +222,17 @@ export function PolicyEditorPage() {
                 rules={activeSession.policy.fileRules}
                 editable
                 onDelete={handleDeleteFileRule}
+                onAdd={() => setShowAddFileRule(true)}
               />
             )}
 
             {activeTab === "signers" && (
-              <SignersTable signers={activeSession.policy.signers} />
+              <SignersTable
+                signers={activeSession.policy.signers}
+                editable
+                onDelete={handleDeleteSigner}
+                onAdd={() => setShowAddSigner(true)}
+              />
             )}
 
             {activeTab === "xml" && (
@@ -242,6 +283,23 @@ export function PolicyEditorPage() {
             )}
           </div>
         </div>
+      )}
+
+      {/* Dialogs — rendered outside the tab layout to avoid z-index issues */}
+      {showAddFileRule && activeSession && (
+        <AddFileRuleDialog
+          policy={activeSession.policy}
+          onCommit={handleAddFileRule}
+          onClose={() => setShowAddFileRule(false)}
+        />
+      )}
+
+      {showAddSigner && activeSession && (
+        <AddSignerDialog
+          policy={activeSession.policy}
+          onCommit={handleAddSigner}
+          onClose={() => setShowAddSigner(false)}
+        />
       )}
     </div>
   );
