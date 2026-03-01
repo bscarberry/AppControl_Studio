@@ -88,42 +88,46 @@ eventsRouter.post("/parse-evtx", upload.single("file"), async (req: Request, res
     return;
   }
 
-  const tmpPath = path.join(
-    os.tmpdir(),
-    `evtx-${Date.now()}-${Math.random().toString(36).slice(2)}.evtx`
-  );
+  const stamp = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const tmpEvtx = path.join(os.tmpdir(), `evtx-${stamp}.evtx`);
+  const tmpScript = path.join(os.tmpdir(), `evtx-${stamp}.ps1`);
 
   try {
-    await fs.writeFile(tmpPath, req.file.buffer);
+    await fs.writeFile(tmpEvtx, req.file.buffer);
+
+    // Write the export script as a real .ps1 file — passing a multi-line script
+    // via -Command collapses everything onto one line and breaks PowerShell syntax.
+    // Using -File avoids all quoting / newline issues entirely.
+    const script = [
+      `$ids = @(3033,3034,3036,3064,3065,3076,3077,3079,3080,3082,3089,3091,3092,3111,3114)`,
+      `$evtxPath = '${tmpEvtx.replace(/'/g, "''")}'`,
+      `Get-WinEvent -Path $evtxPath -Oldest -ErrorAction SilentlyContinue |`,
+      `  Where-Object { $_.Id -in $ids } |`,
+      `  ForEach-Object {`,
+      `    $xml = [xml]$_.ToXml()`,
+      `    $fields = @{}`,
+      `    foreach ($d in $xml.Event.EventData.Data) {`,
+      `      if ($d.Name) { $fields[$d.Name] = $d.'#text' }`,
+      `    }`,
+      `    [PSCustomObject]@{`,
+      `      EventId     = $_.Id`,
+      `      TimeCreated = $_.TimeCreated.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ss.fffZ')`,
+      `      MachineName = $_.MachineName`,
+      `      ActivityId  = if ($_.ActivityId) { $_.ActivityId.ToString('B').ToUpper() } else { $null }`,
+      `      Level       = $_.Level`,
+      `      Fields      = $fields`,
+      `    }`,
+      `  } | ConvertTo-Json -Depth 5`,
+    ].join("\r\n");
+
+    await fs.writeFile(tmpScript, script, "utf8");
 
     const json = await new Promise<string>((resolve, reject) => {
-      // Use the named-field format so hashes, publisher TBS, and file attributes are
-      // correctly extracted. The $event.ToXml() approach gives named Data elements
-      // with binary data (hashes) already encoded as hex strings.
-      const psCommand = [
-        `$ids = @(3033,3034,3036,3064,3065,3076,3077,3079,3080,3082,3089,3091,3092,3111,3114)`,
-        `Get-WinEvent -Path '${tmpPath}' -Oldest -ErrorAction SilentlyContinue |`,
-        `  Where-Object { $_.Id -in $ids } |`,
-        `  ForEach-Object {`,
-        `    $xml = [xml]$_.ToXml()`,
-        `    $fields = @{}`,
-        `    foreach ($d in $xml.Event.EventData.Data) { if ($d.Name) { $fields[$d.Name] = $d.'#text' } }`,
-        `    [PSCustomObject]@{`,
-        `      EventId     = $_.Id`,
-        `      TimeCreated = $_.TimeCreated.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ss.fffZ')`,
-        `      MachineName = $_.MachineName`,
-        `      ActivityId  = if ($_.ActivityId) { $_.ActivityId.ToString('B').ToUpper() } else { $null }`,
-        `      Level       = $_.Level`,
-        `      Fields      = $fields`,
-        `    }`,
-        `  } | ConvertTo-Json -Depth 5`,
-      ].join(" ");
-
       const ps = spawn("powershell.exe", [
         "-NoProfile",
         "-NonInteractive",
-        "-Command",
-        psCommand,
+        "-ExecutionPolicy", "Bypass",
+        "-File", tmpScript,
       ]);
 
       let stdout = "";
@@ -147,6 +151,7 @@ eventsRouter.post("/parse-evtx", upload.single("file"), async (req: Request, res
       error: { code: "PARSE_ERROR", message: (err as Error).message },
     });
   } finally {
-    await fs.unlink(tmpPath).catch(() => {});
+    await fs.unlink(tmpEvtx).catch(() => {});
+    await fs.unlink(tmpScript).catch(() => {});
   }
 });
