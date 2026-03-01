@@ -8,14 +8,13 @@
 
 import { useMsal } from "@azure/msal-react";
 import { Shield, LogIn } from "lucide-react";
-import { API_SCOPE } from "../lib/msal-config.ts";
 
 export function SignInPage() {
   const { instance } = useMsal();
 
   const handleSignIn = () => {
     instance.loginRedirect({
-      scopes: [API_SCOPE],
+      scopes: ["openid", "profile"],
       prompt: "select_account",
     });
   };

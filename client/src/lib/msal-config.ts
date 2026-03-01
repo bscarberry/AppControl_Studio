@@ -11,6 +11,11 @@
  *
  * Optional:
  *   VITE_MSAL_REDIRECT_URI  — Defaults to window.location.origin
+ *
+ * No custom API scope or "Expose an API" configuration is required. The app
+ * uses the OIDC ID token issued during login. The backend validates the ID
+ * token against the tenant JWKS endpoint and accepts the client ID as the
+ * audience claim — no additional app registration setup needed.
  */
 
 import { PublicClientApplication, type Configuration } from "@azure/msal-browser";
@@ -20,13 +25,6 @@ export const MSAL_TENANT_ID = import.meta.env.VITE_MSAL_TENANT_ID as string | un
 
 /** True when MSAL env vars are present — authentication is enforced. */
 export const isMsalEnabled = !!(MSAL_CLIENT_ID && MSAL_TENANT_ID);
-
-/**
- * The scope to request when acquiring tokens for the backend API.
- * Derived from the client ID — matches the scope exposed under
- * "Expose an API" in your app registration (access_as_user).
- */
-export const API_SCOPE = `api://${MSAL_CLIENT_ID}/access_as_user`;
 
 // ---------------------------------------------------------------------------
 // PublicClientApplication — only instantiated when MSAL is enabled
@@ -54,31 +52,21 @@ if (isMsalEnabled) {
 export const msalInstance = _msalInstance;
 
 // ---------------------------------------------------------------------------
-// Token acquisition helper — used by the API client
+// Token helper — used by the API client
 // ---------------------------------------------------------------------------
 
 /**
- * Returns the current access token for the signed-in account, or null if
- * MSAL is disabled or no account is signed in.
+ * Returns the cached ID token for the signed-in account, or null when MSAL
+ * is disabled or no account is active.
  *
- * Attempts a silent refresh first; falls back to returning null (letting the
- * AuthGuard redirect to sign-in).
+ * The ID token (aud = clientId) is used instead of a custom access token so
+ * that "Expose an API" does not need to be configured in the app registration.
+ * The backend's msal-auth middleware already accepts the bare client ID as a
+ * valid audience when validating tokens.
  */
-export async function getAccessToken(): Promise<string | null> {
+export function getAccessToken(): string | null {
   if (!isMsalEnabled || !msalInstance) return null;
-
   const accounts = msalInstance.getAllAccounts();
   if (accounts.length === 0) return null;
-
-  try {
-    const result = await msalInstance.acquireTokenSilent({
-      scopes: [API_SCOPE],
-      account: accounts[0],
-    });
-    return result.accessToken;
-  } catch {
-    // Silent acquisition failed (consent required, session expired, etc.)
-    // The AuthGuard will force re-login on the next render cycle.
-    return null;
-  }
+  return accounts[0].idToken ?? null;
 }
