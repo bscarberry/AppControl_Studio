@@ -13,6 +13,8 @@ import type {
   CreatePolicyFromEventsResponse,
   ProposeRulesResponse,
   HuntingIngestApiResponse,
+  SecurityStatus,
+  SecurityAuditResponse,
   WdacPolicy,
   ParsedCiEvent,
 } from "@appcontrol/shared";
@@ -91,6 +93,15 @@ export const policyApi = {
     includePathRules?: boolean;
     effect?: "Allow" | "Deny";
   }) => post<HuntingIngestApiResponse>("/policy/ingest-advanced-hunting", params),
+};
+
+// ---------------------------------------------------------------------------
+// Security API
+// ---------------------------------------------------------------------------
+
+export const securityApi = {
+  status: () => get<SecurityStatus>("/security/status"),
+  audit: (limit = 100) => get<SecurityAuditResponse>(`/security/audit?limit=${limit}`),
 };
 
 // ---------------------------------------------------------------------------

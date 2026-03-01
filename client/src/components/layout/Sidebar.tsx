@@ -9,6 +9,7 @@ import {
   Cpu,
   ShieldCheck,
   Search,
+  Lock,
   ChevronRight,
 } from "lucide-react";
 import clsx from "clsx";
@@ -69,6 +70,12 @@ const navItems: NavItem[] = [
     label: "Export",
     icon: <Download size={16} />,
     description: "Download deployable XML",
+  },
+  {
+    to: "/security",
+    label: "Security",
+    icon: <Lock size={16} />,
+    description: "Posture, RBAC, audit log",
   },
 ];
 

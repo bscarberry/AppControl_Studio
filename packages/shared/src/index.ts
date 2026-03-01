@@ -83,6 +83,14 @@ export type {
   PolicySemanticDiff,
 } from "./policy-diff";
 
+// Type re-exports from security-types
+export type {
+  RbacRole,
+  AuditEventType,
+  AuditEvent,
+  SecurityStatus,
+} from "./security-types";
+
 // Type re-exports from hunting-ingest
 export type {
   HuntingSigningCoverage,
@@ -121,4 +129,5 @@ export type {
   SemanticComparePoliciesResponse,
   HuntingIngestApiRequest,
   HuntingIngestApiResponse,
+  SecurityAuditResponse,
 } from "./api";

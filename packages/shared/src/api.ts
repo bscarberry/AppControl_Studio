@@ -165,6 +165,15 @@ export interface HuntingIngestApiRequest {
 
 export type { HuntingImportResult } from "./hunting-ingest";
 
+/** GET /api/security/status */
+export type { SecurityStatus } from "./security-types";
+
+/** GET /api/security/audit */
+export interface SecurityAuditResponse {
+  events: import("./security-types").AuditEvent[];
+  totalInMemory: number;
+}
+
 export interface HuntingIngestApiResponse {
   binaries: import("./hunting-ingest").HuntingBinary[];
   ruleCandidates: import("./hunting-ingest").HuntingRuleCandidate[];
