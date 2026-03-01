@@ -20,13 +20,19 @@ import type {
   WdacPolicy,
   ParsedCiEvent,
 } from "@appcontrol/shared";
+import { getAccessToken } from "./msal-config.ts";
 
 const BASE = "/api";
+
+async function authHeaders(): Promise<Record<string, string>> {
+  const token = await getAccessToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
 
 async function post<T>(path: string, body: unknown): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
     body: JSON.stringify(body),
   });
   const json = (await res.json()) as ApiResponse<T>;
@@ -37,7 +43,7 @@ async function post<T>(path: string, body: unknown): Promise<T> {
 }
 
 async function get<T>(path: string): Promise<T> {
-  const res = await fetch(`${BASE}${path}`);
+  const res = await fetch(`${BASE}${path}`, { headers: await authHeaders() });
   const json = (await res.json()) as ApiResponse<T>;
   if (!json.ok) {
     throw new Error((json as { ok: false; error: { message: string } }).error.message);

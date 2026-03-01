@@ -12,9 +12,13 @@ import {
   Lock,
   PlayCircle,
   ChevronRight,
+  LogOut,
+  User,
 } from "lucide-react";
 import clsx from "clsx";
 import { useAppStore } from "../../store/index.ts";
+import { isMsalEnabled } from "../../lib/msal-config.ts";
+import { useMsal } from "@azure/msal-react";
 
 interface NavItem {
   to: string;
@@ -85,6 +89,33 @@ const navItems: NavItem[] = [
     description: "Posture, RBAC, audit log",
   },
 ];
+
+/**
+ * Shown in the sidebar footer when MSAL is enabled.
+ * Kept as a separate component so useMsal() is only called when the component
+ * is rendered inside MsalProvider (i.e. when isMsalEnabled is true).
+ */
+function MsalUserFooter() {
+  const { instance, accounts } = useMsal();
+  const account = accounts[0];
+  if (!account) return null;
+
+  return (
+    <div className="flex items-center gap-2">
+      <User size={12} className="text-text-muted flex-shrink-0" />
+      <span className="text-xs text-text-muted truncate flex-1" title={account.username}>
+        {account.username}
+      </span>
+      <button
+        onClick={() => instance.logoutPopup({ account })}
+        className="text-text-muted hover:text-text-primary transition-colors flex-shrink-0"
+        title="Sign out"
+      >
+        <LogOut size={12} />
+      </button>
+    </div>
+  );
+}
 
 export function Sidebar() {
   const { sessions, activePolicyId, setActivePolicy } = useAppStore();
@@ -157,7 +188,8 @@ export function Sidebar() {
       </nav>
 
       {/* Footer */}
-      <div className="px-4 py-3 border-t border-border">
+      <div className="px-4 py-3 border-t border-border space-y-2">
+        {isMsalEnabled && <MsalUserFooter />}
         <p className="text-xs text-text-muted">Local processing only.</p>
         <p className="text-xs text-text-muted">No data leaves your machine.</p>
       </div>

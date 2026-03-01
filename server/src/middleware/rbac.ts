@@ -102,6 +102,23 @@ export function createRbacMiddleware(config: RbacConfig) {
   return (req: Request, res: Response, next: NextFunction): void => {
     const logger = getAuditLogger();
 
+    // Already authenticated by a prior middleware (e.g. MSAL JWT validation) —
+    // skip token-hash check but still enforce route permission matrix below.
+    if (req.userRole) {
+      const required = requiredRoleFor(req.method, req.path);
+      if (required !== null && ROLE_RANK[req.userRole] < ROLE_RANK[required]) {
+        res.status(403).json({
+          ok: false,
+          error: {
+            code: "FORBIDDEN",
+            message: `Role '${req.userRole}' does not have access to this operation`,
+          },
+        });
+        return;
+      }
+      return next();
+    }
+
     // RBAC disabled — grant full access
     if (!config.enabled) {
       req.userRole = "admin";

@@ -21,6 +21,7 @@ import { eventsRouter } from "./routes/events.js";
 import { securityRouter } from "./routes/security.js";
 import { errorHandler, requestSizeGuard } from "./middleware/error-handler.js";
 import { createRbacMiddleware } from "./middleware/rbac.js";
+import { createMsalAuthMiddleware, isMsalAuthEnabled } from "./middleware/msal-auth.js";
 import { loadSecurityConfig } from "./config/security-config.js";
 import { initAuditLogger, getAuditLogger } from "./services/audit-logger.js";
 
@@ -44,6 +45,15 @@ const app = express();
   // Security headers
   // ---------------------------------------------------------------------------
 
+  // When MSAL is enabled the browser needs to reach Microsoft's login endpoint
+  // for the popup auth flow and silent token refresh iframes.
+  const msalConnectSrc = isMsalAuthEnabled
+    ? ["https://login.microsoftonline.com", "https://login.microsoft.com"]
+    : [];
+  const msalFrameSrc = isMsalAuthEnabled
+    ? ["https://login.microsoftonline.com"]
+    : ["'none'"];
+
   app.use(
     helmet({
       contentSecurityPolicy: {
@@ -52,14 +62,14 @@ const app = express();
           scriptSrc: ["'self'"],
           styleSrc: ["'self'", "'unsafe-inline'"],
           imgSrc: ["'self'", "data:"],
-          connectSrc: ["'self'"],
-          frameSrc: ["'none'"],
+          connectSrc: ["'self'", ...msalConnectSrc],
+          frameSrc: msalFrameSrc,
           objectSrc: ["'none'"],
         },
       },
       // Disable caching of responses that contain policy data
       noSniff: true,
-      frameguard: { action: "deny" },
+      frameguard: isMsalAuthEnabled ? { action: "sameorigin" } : { action: "deny" },
     })
   );
 
@@ -91,9 +101,15 @@ const app = express();
   app.use(express.text({ limit: "50mb" }));
 
   // ---------------------------------------------------------------------------
-  // RBAC — applied to all /api/* routes
+  // Authentication — applied to all /api/* routes
+  //
+  // 1. MSAL JWT middleware: validates Azure AD tokens when MSAL_TENANT_ID and
+  //    MSAL_CLIENT_ID env vars are set.  Sets req.userRole on success.
+  // 2. RBAC middleware: handles SHA-256 opaque tokens (and the disabled/local
+  //    mode).  Skips token validation if req.userRole is already set by MSAL.
   // ---------------------------------------------------------------------------
 
+  app.use("/api", createMsalAuthMiddleware());
   const rbacMiddleware = createRbacMiddleware(secConfig.rbac);
   app.use("/api", rbacMiddleware);
 
