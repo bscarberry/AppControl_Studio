@@ -107,7 +107,7 @@ function MsalUserFooter() {
         {account.username}
       </span>
       <button
-        onClick={() => instance.logoutPopup({ account })}
+        onClick={() => instance.logoutRedirect({ account })}
         className="text-text-muted hover:text-text-primary transition-colors flex-shrink-0"
         title="Sign out"
       >

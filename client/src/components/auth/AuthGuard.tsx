@@ -24,13 +24,15 @@ export function AuthGuard({ children }: AuthGuardProps) {
   const { inProgress } = useMsal();
   const isAuthenticated = useIsAuthenticated();
 
-  // While a login/logout interaction is in flight, show a neutral loading
-  // screen instead of flashing the sign-in page.
-  // msal-browser v5 removed InteractionStatus.Login; login interactions
-  // now surface as AcquireToken.
+  // While MSAL is initialising or processing the redirect response, show a
+  // loading screen to avoid a flash of the sign-in page.
+  // Startup  — MSAL is initialising (first render after navigation back)
+  // HandleRedirect — MSAL is exchanging the auth code on return from Microsoft
+  // AcquireToken   — silent/interactive token refresh in progress
   if (
     !isAuthenticated &&
-    (inProgress === InteractionStatus.HandleRedirect ||
+    (inProgress === InteractionStatus.Startup ||
+      inProgress === InteractionStatus.HandleRedirect ||
       inProgress === InteractionStatus.AcquireToken)
   ) {
     return (

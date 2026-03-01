@@ -53,8 +53,9 @@ Copy `client/.env.example` to `client/.env` (or `client/.env.local`) and fill in
 VITE_MSAL_CLIENT_ID=00000000-0000-0000-0000-000000000000   # Application (client) ID
 VITE_MSAL_TENANT_ID=00000000-0000-0000-0000-000000000000   # Directory (tenant) ID
 VITE_MSAL_REDIRECT_URI=http://localhost:5173                # Must match a registered Redirect URI
-VITE_MSAL_API_SCOPE=api://<client-id>/access_as_user       # Optional — derived from client ID if omitted
 ```
+
+The API scope (`api://<client-id>/access_as_user`) is derived automatically from the client ID and does not need to be set separately.
 
 ### Server configuration
 
@@ -73,8 +74,8 @@ No client secret is needed; the SPA uses the public PKCE flow.
 ### How it works
 
 1. On first visit, unauthenticated users see a **Sign in with Microsoft** page
-2. Clicking the button opens a Microsoft login popup (no full-page redirect)
-3. After successful login, MSAL stores the session in `sessionStorage`
+2. Clicking the button navigates the current tab to Microsoft's login page (redirect flow — no popups)
+3. After successful login, Microsoft redirects back to `VITE_MSAL_REDIRECT_URI`; MSAL exchanges the auth code and stores the session in `sessionStorage`
 4. Every API call automatically attaches `Authorization: Bearer <access-token>`
 5. The server validates the JWT signature, issuer, audience, and expiry before processing any request
 6. The signed-in username is displayed in the sidebar footer with a sign-out button

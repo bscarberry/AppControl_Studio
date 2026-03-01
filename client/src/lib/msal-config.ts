@@ -11,7 +11,6 @@
  *
  * Optional:
  *   VITE_MSAL_REDIRECT_URI  — Defaults to window.location.origin
- *   VITE_MSAL_API_SCOPE     — API scope URI; defaults to api://<clientId>/access_as_user
  */
 
 import { PublicClientApplication, type Configuration } from "@azure/msal-browser";
@@ -24,11 +23,10 @@ export const isMsalEnabled = !!(MSAL_CLIENT_ID && MSAL_TENANT_ID);
 
 /**
  * The scope to request when acquiring tokens for the backend API.
- * Must match a scope exposed under "Expose an API" in your app registration.
+ * Derived from the client ID — matches the scope exposed under
+ * "Expose an API" in your app registration (access_as_user).
  */
-export const API_SCOPE: string =
-  (import.meta.env.VITE_MSAL_API_SCOPE as string | undefined) ??
-  `api://${MSAL_CLIENT_ID}/access_as_user`;
+export const API_SCOPE = `api://${MSAL_CLIENT_ID}/access_as_user`;
 
 // ---------------------------------------------------------------------------
 // PublicClientApplication — only instantiated when MSAL is enabled
