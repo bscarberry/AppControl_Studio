@@ -137,7 +137,7 @@ policyRouter.post("/compare", (req: Request, res: Response) => {
     logger.log("POLICY_COMPARED", {
       role: req.userRole,
       inputHash: hashInput(parsed.data.leftXml + "||" + parsed.data.rightXml),
-      outputSummary: `added=${(comparison.fileRuleChanges ?? []).filter(c => c.status === "added").length} removed=${(comparison.fileRuleChanges ?? []).filter(c => c.status === "removed").length}`,
+      outputSummary: `added=${comparison.fileRuleDiffs.filter(c => c.status === "added").length} removed=${comparison.fileRuleDiffs.filter(c => c.status === "removed").length}`,
       durationMs: Date.now() - start,
       succeeded: true,
     });
@@ -295,7 +295,7 @@ policyRouter.post("/propose-rules", (req: Request, res: Response) => {
     logger.log("RULES_PROPOSED", {
       role: req.userRole,
       inputSizeBytes: parsed.data.events.length,
-      outputSummary: `proposed=${changes.proposedRules.length} warnings=${changes.globalWarnings.length}`,
+      outputSummary: `proposed=${changes.rules.length} warnings=${changes.globalWarnings.length}`,
       durationMs: Date.now() - start,
       succeeded: true,
     });
