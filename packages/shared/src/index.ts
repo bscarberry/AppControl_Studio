@@ -129,6 +129,8 @@ export type {
   ComparePoliciesResponse,
   MergePoliciesRequest,
   MergePoliciesResponse,
+  FileRuleType,
+  FileRuleSelection,
   CreatePolicyFromEventsRequest,
   CreatePolicyFromEventsResponse,
   ParseEventsRequest,

@@ -1,58 +1,108 @@
 [
   {
-    "Id": 3076,
-    "TimeCreated": {
-      "SystemTime": "2024-11-15T09:23:41.847Z"
-    },
+    "EventId": 3076,
+    "TimeCreated": "2024-11-15T09:23:41.847Z",
     "MachineName": "WORKSTATION-01.corp.example.com",
-    "Message": "Code Integrity determined that a process attempted to load a binary that did not meet the requirements.",
-    "Properties": [
-      { "Value": "C:\\Users\\user1\\Downloads\\app_installer.exe" },
-      { "Value": "C:\\Windows\\explorer.exe" },
-      { "Value": "A1B2C3D4E5F6A7B8C9D0E1F2A3B4C5D6E7F8A9B0C1D2E3F4A5B6C7D8E9F0A1B2" },
-      { "Value": "A1B2C3D4E5F6A7B8C9D0E1F2A3B4C5D6E7F8A9B0" },
-      { "Value": "app_installer.exe" }
-    ]
+    "ActivityId": "{12345678-1234-1234-1234-123456789001}",
+    "Level": 4,
+    "Fields": {
+      "FileNameBuffer": "C:\\Users\\user1\\Downloads\\app_installer.exe",
+      "ProcessNameBuffer": "C:\\Windows\\explorer.exe",
+      "Sha256FlatHash": "A1B2C3D4E5F6A7B8C9D0E1F2A3B4C5D6E7F8A9B0C1D2E3F4A5B6C7D8E9F0A1B2",
+      "Sha1FlatHash": "A1B2C3D4E5F6A7B8C9D0E1F2A3B4C5D6E7F8A9B0",
+      "PolicyName": "Audit Mode Policy",
+      "PolicyGuid": "{00000000-0000-0000-0000-000000000000}"
+    }
   },
   {
-    "Id": 3077,
-    "TimeCreated": {
-      "SystemTime": "2024-11-15T09:31:18.123Z"
-    },
+    "EventId": 3089,
+    "TimeCreated": "2024-11-15T09:23:41.848Z",
     "MachineName": "WORKSTATION-01.corp.example.com",
-    "Message": "Code Integrity policy would have blocked script from loading but is in audit mode.",
-    "Properties": [
-      { "Value": "C:\\Temp\\deploy.ps1" },
-      { "Value": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" },
-      { "Value": "B2C3D4E5F6A7B8C9D0E1F2A3B4C5D6E7F8A9B0C1D2E3F4A5B6C7D8E9F0A1B2C3" },
-      { "Value": "B2C3D4E5F6A7B8C9D0E1F2A3B4C5D6E7F8A9B0C1" }
-    ]
+    "ActivityId": "{12345678-1234-1234-1234-123456789001}",
+    "Level": 4,
+    "Fields": {
+      "FileNameBuffer": "C:\\Users\\user1\\Downloads\\app_installer.exe",
+      "PolicyGuid": "{00000000-0000-0000-0000-000000000000}",
+      "TotalSignatureCount": "1",
+      "SignatureIndex": "0",
+      "NotValidBefore": "2023-01-01T00:00:00Z",
+      "NotValidAfter": "2025-12-31T23:59:59Z",
+      "PublisherName": "CN=Contoso Ltd, O=Contoso Ltd, L=Redmond, S=Washington, C=US",
+      "IssuerName": "CN=DigiCert Trusted G4 Code Signing RSA4096 SHA384 2021 CA1, O=DigiCert\\, Inc., C=US",
+      "PublisherTBSHash": "B3A9E7C2F1D8A4E6B2C8D4F6A2E8C4D6B2A8E4C6D2B8A4E6C2D8A4B6E2C8D4F6",
+      "IssuerTBSHash": "C4B8A2E6D4F8A2B6E4C8D2F6A4B8E2C6D4F2A8B6E4C2D8A6F4B2E8C4D6A2F8C4",
+      "OriginalFilename": "AppInstaller.exe",
+      "InternalName": "AppInstaller",
+      "FileDescription": "Application Installer",
+      "ProductName": "Contoso Application Suite",
+      "FileVersion": "2.1.4.0"
+    }
   },
   {
-    "Id": 3076,
-    "TimeCreated": {
-      "SystemTime": "2024-11-15T10:05:52.000Z"
-    },
+    "EventId": 3077,
+    "TimeCreated": "2024-11-15T09:31:18.123Z",
+    "MachineName": "WORKSTATION-01.corp.example.com",
+    "ActivityId": "{12345678-1234-1234-1234-123456789002}",
+    "Level": 2,
+    "Fields": {
+      "FileNameBuffer": "C:\\Temp\\deploy.ps1",
+      "ProcessNameBuffer": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+      "Sha256FlatHash": "B2C3D4E5F6A7B8C9D0E1F2A3B4C5D6E7F8A9B0C1D2E3F4A5B6C7D8E9F0A1B2C3",
+      "Sha1FlatHash": "B2C3D4E5F6A7B8C9D0E1F2A3B4C5D6E7F8A9B0C1",
+      "PolicyName": "Enforcement Policy",
+      "PolicyGuid": "{11111111-1111-1111-1111-111111111111}"
+    }
+  },
+  {
+    "EventId": 3076,
+    "TimeCreated": "2024-11-15T10:05:52.000Z",
     "MachineName": "WORKSTATION-02.corp.example.com",
-    "Message": "Code Integrity policy would have blocked binary but is in audit mode.",
-    "Properties": [
-      { "Value": "C:\\Program Files (x86)\\Vendor\\VendorApp\\VendorApp.exe" },
-      { "Value": "C:\\Windows\\System32\\svchost.exe" },
-      { "Value": "C4D5E6F7A8B9C0D1E2F3A4B5C6D7E8F9A0B1C2D3E4F5A6B7C8D9E0F1A2B3C4D5" },
-      { "Value": "C4D5E6F7A8B9C0D1E2F3A4B5C6D7E8F9A0B1C2D3" }
-    ]
+    "ActivityId": "{12345678-1234-1234-1234-123456789003}",
+    "Level": 4,
+    "Fields": {
+      "FileNameBuffer": "C:\\Program Files (x86)\\Vendor\\VendorApp\\VendorApp.exe",
+      "ProcessNameBuffer": "C:\\Windows\\System32\\svchost.exe",
+      "Sha256FlatHash": "C4D5E6F7A8B9C0D1E2F3A4B5C6D7E8F9A0B1C2D3E4F5A6B7C8D9E0F1A2B3C4D5",
+      "Sha1FlatHash": "C4D5E6F7A8B9C0D1E2F3A4B5C6D7E8F9A0B1C2D3",
+      "PolicyName": "Audit Mode Policy",
+      "PolicyGuid": "{00000000-0000-0000-0000-000000000000}"
+    }
   },
   {
-    "Id": 3089,
-    "TimeCreated": {
-      "SystemTime": "2024-11-15T11:42:09.555Z"
-    },
+    "EventId": 3089,
+    "TimeCreated": "2024-11-15T10:05:52.001Z",
+    "MachineName": "WORKSTATION-02.corp.example.com",
+    "ActivityId": "{12345678-1234-1234-1234-123456789003}",
+    "Level": 4,
+    "Fields": {
+      "FileNameBuffer": "C:\\Program Files (x86)\\Vendor\\VendorApp\\VendorApp.exe",
+      "TotalSignatureCount": "1",
+      "SignatureIndex": "0",
+      "NotValidBefore": "2022-06-01T00:00:00Z",
+      "NotValidAfter": "2026-06-01T23:59:59Z",
+      "PublisherName": "CN=Vendor Corp, O=Vendor Corp, L=Austin, S=Texas, C=US",
+      "IssuerName": "CN=Sectigo RSA Code Signing CA, O=Sectigo Limited, C=GB",
+      "PublisherTBSHash": "D5E6F7A8B9C0D1E2F3A4B5C6D7E8F9A0B1C2D3E4F5A6B7C8D9E0F1A2B3C4D5E6",
+      "IssuerTBSHash": "E6F7A8B9C0D1E2F3A4B5C6D7E8F9A0B1C2D3E4F5A6B7C8D9E0F1A2B3C4D5E6F7",
+      "OriginalFilename": "VendorApp.exe",
+      "InternalName": "VendorApp",
+      "FileDescription": "Vendor Application Service",
+      "ProductName": "VendorSuite Enterprise",
+      "FileVersion": "3.5.1.0"
+    }
+  },
+  {
+    "EventId": 3076,
+    "TimeCreated": "2024-11-15T11:42:09.555Z",
     "MachineName": "SERVER-DC01.corp.example.com",
-    "Message": "The file was blocked from loading due to a supplemental policy.",
-    "Properties": [
-      { "Value": "C:\\Tools\\AdminTool.exe" },
-      { "Value": "C:\\Windows\\System32\\cmd.exe" },
-      { "Value": "D5E6F7A8B9C0D1E2F3A4B5C6D7E8F9A0B1C2D3E4F5A6B7C8D9E0F1A2B3C4D5E6" }
-    ]
+    "ActivityId": null,
+    "Level": 4,
+    "Fields": {
+      "FileNameBuffer": "C:\\Tools\\AdminTool.exe",
+      "ProcessNameBuffer": "C:\\Windows\\System32\\cmd.exe",
+      "Sha256FlatHash": "D5E6F7A8B9C0D1E2F3A4B5C6D7E8F9A0B1C2D3E4F5A6B7C8D9E0F1A2B3C4D5E6",
+      "PolicyName": "Audit Mode Policy",
+      "PolicyGuid": "{00000000-0000-0000-0000-000000000000}"
+    }
   }
 ]

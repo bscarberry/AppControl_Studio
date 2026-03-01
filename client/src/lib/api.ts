@@ -10,6 +10,7 @@ import type {
   SemanticComparePoliciesResponse,
   EventImportResult,
   ExplainPolicyResponse,
+  CreatePolicyFromEventsRequest,
   CreatePolicyFromEventsResponse,
   ProposeRulesResponse,
   HuntingIngestApiResponse,
@@ -71,14 +72,8 @@ export const policyApi = {
   explain: (policy: WdacPolicy) =>
     post<ExplainPolicyResponse>("/policy/explain", { policy }),
 
-  fromEvents: (params: {
-    events: ParsedCiEvent[];
-    policyName: string;
-    template?: "default-windows" | "allow-microsoft" | "deny-by-default" | "blank";
-    preferPublisherRules: boolean;
-    includePathRules: boolean;
-    auditMode: boolean;
-  }) => post<CreatePolicyFromEventsResponse>("/policy/from-events", params),
+  fromEvents: (params: CreatePolicyFromEventsRequest) =>
+    post<CreatePolicyFromEventsResponse>("/policy/from-events", params),
 
   getOptions: () =>
     get<{ options: Array<{ value: number; name: string; description: string; critical: boolean }> }>(

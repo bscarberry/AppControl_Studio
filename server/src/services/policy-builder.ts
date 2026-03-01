@@ -3,6 +3,12 @@
  *
  * Creates a new WDAC policy from parsed CodeIntegrity events.
  * Generates the minimum required rules to allow the observed files.
+ *
+ * Rule-type precedence (best to broadest):
+ *   Publisher (CertRoot TBS + CertPublisher)  — survives binary updates
+ *   FileAttrib (OriginalFileName)             — survives version updates, requires publisher scoping
+ *   Hash (SHA256FlatHash)                     — exact binary match
+ *   Path (FilePath)                           — weakest; bypass risk
  */
 
 import { v4 as uuidv4 } from "uuid";
@@ -14,7 +20,7 @@ import type {
   PolicyRuleOption,
   AllowedSigner,
 } from "@appcontrol/shared";
-import type { ParsedCiEvent } from "@appcontrol/shared";
+import type { ParsedCiEvent, FileRuleType, FileRuleSelection } from "@appcontrol/shared";
 import type { CreatePolicyFromEventsRequest } from "@appcontrol/shared";
 
 // ---------------------------------------------------------------------------
@@ -25,8 +31,8 @@ type TemplateName = NonNullable<CreatePolicyFromEventsRequest["template"]>;
 
 function getTemplateOptions(template: TemplateName): PolicyRuleOption[] {
   const base: PolicyRuleOption[] = [
-    { value: 0, enabled: true },  // UMCI
-    { value: 6, enabled: true },  // Unsigned allowed (for dev)
+    { value: 0, enabled: true }, // UMCI
+    { value: 6, enabled: true }, // Unsigned system integrity policy
   ];
 
   switch (template) {
@@ -42,7 +48,7 @@ function getTemplateOptions(template: TemplateName): PolicyRuleOption[] {
       return [
         { value: 0, enabled: true },
         { value: 2, enabled: true },
-        { value: 8, enabled: true },
+        { value: 8, enabled: true }, // EV signers required
       ];
     case "blank":
     default:
@@ -51,6 +57,68 @@ function getTemplateOptions(template: TemplateName): PolicyRuleOption[] {
         { value: 6, enabled: true },
       ];
   }
+}
+
+// ---------------------------------------------------------------------------
+// Unique-file grouping
+// ---------------------------------------------------------------------------
+
+interface UniqueFile {
+  /** Stable key for deduplication: sha256FlatHash if available, else filePath */
+  key: string;
+  events: ParsedCiEvent[];
+  /** Best representative event (one with the most data) */
+  best: ParsedCiEvent;
+}
+
+function groupUniqueFiles(events: ParsedCiEvent[]): UniqueFile[] {
+  const map = new Map<string, UniqueFile>();
+
+  for (const event of events) {
+    const key = event.sha256FlatHash ?? event.sha256Hash ?? event.filePath.toLowerCase();
+    const existing = map.get(key);
+    if (existing) {
+      existing.events.push(event);
+      // Prefer the event with the most data (has publisher info, attributes, etc.)
+      const score = (e: ParsedCiEvent) =>
+        (e.signerInfo?.publisherTbsHash ? 4 : 0) +
+        (e.signerInfo?.publisherName ? 2 : 0) +
+        (e.originalFileName ? 1 : 0) +
+        (e.sha256FlatHash ? 1 : 0);
+      if (score(event) > score(existing.best)) existing.best = event;
+    } else {
+      map.set(key, { key, events: [event], best: event });
+    }
+  }
+
+  return Array.from(map.values());
+}
+
+// ---------------------------------------------------------------------------
+// Rule type resolution
+// ---------------------------------------------------------------------------
+
+function resolveRuleType(
+  file: UniqueFile,
+  ruleSelectionMap: Map<string, FileRuleType>,
+  defaultRuleType: FileRuleType,
+  preferPublisherRules: boolean,
+  includePathRules: boolean
+): FileRuleType {
+  // Per-file override takes precedence
+  const override = ruleSelectionMap.get(file.key);
+  if (override) return override;
+
+  // Legacy global toggles
+  if (preferPublisherRules && file.best.signerInfo?.publisherTbsHash) {
+    return "publisher";
+  }
+
+  if (defaultRuleType !== "hash") return defaultRuleType;
+
+  if (file.best.sha256FlatHash ?? file.best.sha256Hash) return "hash";
+  if (includePathRules) return "path";
+  return "skip";
 }
 
 // ---------------------------------------------------------------------------
@@ -67,7 +135,7 @@ export function buildPolicyFromEvents(
   log.push(`Template: ${req.template ?? "blank"}`);
   log.push(`Mode: ${req.auditMode ? "Audit" : "Enforcement"}`);
 
-  // Start with template options
+  // Template options
   const options = getTemplateOptions(req.template ?? "blank");
   if (req.auditMode) {
     const auditIdx = options.findIndex((o) => o.value === 3);
@@ -76,96 +144,160 @@ export function buildPolicyFromEvents(
     log.push("Added Option 3: Audit Mode");
   }
 
+  // Build per-file rule selection map
+  const ruleSelectionMap = new Map<string, FileRuleType>();
+  for (const sel of req.ruleSelections ?? []) {
+    ruleSelectionMap.set(sel.fileKey, sel.ruleType);
+  }
+
+  const defaultRuleType: FileRuleType = req.defaultRuleType ?? "hash";
+
+  // Group events by unique file
+  const uniqueFiles = groupUniqueFiles(req.events);
+  log.push(`Unique files: ${uniqueFiles.length}`);
+
   const fileRules: WdacFileRule[] = [];
   const signers: WdacSignerRule[] = [];
-  const signerIdMap = new Map<string, string>(); // fingerprint -> signer ID
+  const signerFpMap = new Map<string, string>(); // fingerprint → signer ID
   const allowedSignerIds: string[] = [];
-  const kernelAllowedSignerIds: string[] = [];
   const fileRuleIds: string[] = [];
-
   const seenHashes = new Set<string>();
   const seenPaths = new Set<string>();
+  const seenFileNames = new Set<string>();
 
-  for (const event of req.events) {
-    // Publisher rules (preferred when signer info available)
-    if (req.preferPublisherRules && event.signerInfo?.publisherName) {
-      const fp = JSON.stringify({
-        publisher: event.signerInfo.publisherName,
-        issuer: event.signerInfo.issuerName,
-        root: event.signerInfo.rootCertTbs,
-      });
+  for (const file of uniqueFiles) {
+    const { best } = file;
+    const ruleType = resolveRuleType(
+      file,
+      ruleSelectionMap,
+      defaultRuleType,
+      req.preferPublisherRules,
+      req.includePathRules
+    );
 
-      if (!signerIdMap.has(fp)) {
+    if (ruleType === "skip") {
+      log.push(`Skipped: ${best.filePath}`);
+      continue;
+    }
+
+    if (ruleType === "publisher" && best.signerInfo?.publisherTbsHash) {
+      // Publisher rule: CertRoot (TBS) + CertPublisher — survives binary updates
+      const fp = best.signerInfo.publisherTbsHash;
+      if (!signerFpMap.has(fp)) {
         const signerId = `ID_SIGNER_${String(signers.length + 1).padStart(4, "0")}`;
-        signerIdMap.set(fp, signerId);
+        signerFpMap.set(fp, signerId);
 
         const signer: WdacSignerRule = {
           id: signerId,
-          name: event.signerInfo.publisherName,
-          ...(event.signerInfo.rootCertTbs && {
-            certRoot: { type: "TBS", value: event.signerInfo.rootCertTbs },
-          }),
-          ...(event.signerInfo.publisherName && {
-            certPublisher: event.signerInfo.publisherName,
+          name: best.signerInfo.publisherName ?? `Publisher ${signers.length + 1}`,
+          certRoot: { type: "TBS", value: fp },
+          ...(best.signerInfo.publisherName && {
+            certPublisher: best.signerInfo.publisherName,
           }),
         };
 
         signers.push(signer);
         allowedSignerIds.push(signerId);
-        log.push(`Added signer rule for publisher: ${event.signerInfo.publisherName}`);
+        log.push(
+          `Publisher rule: ${best.signerInfo.publisherName ?? fp} ` +
+          `(TBS: ${fp.substring(0, 16)}…) — covers: ${best.filePath}`
+        );
+      } else {
+        log.push(
+          `Publisher rule reused for: ${best.filePath}`
+        );
       }
-    }
-
-    // Hash-based rules
-    if (event.sha256Hash && !seenHashes.has(event.sha256Hash)) {
-      seenHashes.add(event.sha256Hash);
-      const ruleId = `ID_ALLOW_${String(fileRules.length + 1).padStart(4, "0")}`;
-      fileRules.push({
-        kind: "hash",
-        id: ruleId,
-        effect: "Allow",
-        friendlyName: event.fileName
-          ? `Allow ${event.fileName} (Hash)`
-          : `Allow Hash ${event.sha256Hash.substring(0, 16)}...`,
-        hash: event.sha256Hash,
-        hashType: "SHA256",
-        ...(event.fileName && { fileName: event.fileName }),
-      });
-      fileRuleIds.push(ruleId);
-      log.push(`Added hash rule for: ${event.filePath}`);
-    }
-
-    // Path rules (optional)
-    if (req.includePathRules && event.filePath && !seenPaths.has(event.filePath)) {
-      const normalizedPath = event.filePath.toLowerCase();
-      if (!normalizedPath.includes("temp") && !normalizedPath.includes("downloads")) {
-        seenPaths.add(event.filePath);
-        const ruleId = `ID_ALLOW_PATH_${String(fileRules.length + 1).padStart(4, "0")}`;
+    } else if (ruleType === "fileAttrib" && best.originalFileName) {
+      // OriginalFileName-based allow rule (attribute rule)
+      // More maintainable than hash rules; should be paired with publisher scoping in production
+      const fn = best.originalFileName.toLowerCase();
+      if (!seenFileNames.has(fn)) {
+        seenFileNames.add(fn);
+        const ruleId = `ID_ALLOW_ATTR_${String(fileRules.length + 1).padStart(4, "0")}`;
         fileRules.push({
-          kind: "path",
+          kind: "attribute",
           id: ruleId,
           effect: "Allow",
-          friendlyName: `Allow ${event.fileName ?? event.filePath} (Path)`,
-          filePath: event.filePath,
-        });
+          friendlyName: `Allow ${best.originalFileName} (FileName)`,
+          fileName: best.originalFileName,
+          ...(best.fileVersion && { minimumFileVersion: "0.0.0.0" }),
+        } as WdacFileRule);
         fileRuleIds.push(ruleId);
-        log.push(`Added path rule for: ${event.filePath}`);
-      } else {
-        log.push(`Skipped path rule for temp/downloads path: ${event.filePath}`);
+        log.push(
+          `File attribute rule: OriginalFileName=${best.originalFileName}` +
+          (best.productName ? ` (${best.productName})` : "")
+        );
+      }
+    } else if (ruleType === "hash" || (ruleType === "publisher" && !best.signerInfo?.publisherTbsHash)) {
+      // Hash rule — exact SHA256 match
+      const hash = best.sha256FlatHash ?? best.sha256Hash;
+      if (hash && !seenHashes.has(hash)) {
+        seenHashes.add(hash);
+        const ruleId = `ID_ALLOW_${String(fileRules.length + 1).padStart(4, "0")}`;
+        fileRules.push({
+          kind: "hash",
+          id: ruleId,
+          effect: "Allow",
+          friendlyName: best.fileName
+            ? `Allow ${best.fileName} (SHA256)`
+            : `Allow Hash ${hash.substring(0, 16)}…`,
+          hash,
+          hashType: "SHA256",
+          ...(best.fileName && { fileName: best.fileName }),
+        } as WdacFileRule);
+        fileRuleIds.push(ruleId);
+        log.push(`Hash rule: ${best.filePath} (SHA256: ${hash.substring(0, 16)}…)`);
+      } else if (!hash) {
+        // Fallback: no hash available, try path if enabled
+        if (req.includePathRules && best.filePath && !seenPaths.has(best.filePath)) {
+          const normalized = best.filePath.toLowerCase();
+          if (!normalized.includes("temp") && !normalized.includes("downloads")) {
+            seenPaths.add(best.filePath);
+            const ruleId = `ID_ALLOW_PATH_${String(fileRules.length + 1).padStart(4, "0")}`;
+            fileRules.push({
+              kind: "path",
+              id: ruleId,
+              effect: "Allow",
+              friendlyName: `Allow ${best.fileName ?? best.filePath} (Path)`,
+              filePath: best.filePath,
+            } as WdacFileRule);
+            fileRuleIds.push(ruleId);
+            log.push(`Path rule (no hash available): ${best.filePath}`);
+          } else {
+            log.push(`Skipped path rule for temp/downloads path: ${best.filePath}`);
+          }
+        } else {
+          log.push(`No hash available and path rules disabled — skipping: ${best.filePath}`);
+        }
+      }
+    } else if (ruleType === "path" && best.filePath) {
+      // Explicit path rule request
+      if (!seenPaths.has(best.filePath)) {
+        const normalized = best.filePath.toLowerCase();
+        if (!normalized.includes("temp") && !normalized.includes("downloads")) {
+          seenPaths.add(best.filePath);
+          const ruleId = `ID_ALLOW_PATH_${String(fileRules.length + 1).padStart(4, "0")}`;
+          fileRules.push({
+            kind: "path",
+            id: ruleId,
+            effect: "Allow",
+            friendlyName: `Allow ${best.fileName ?? best.filePath} (Path)`,
+            filePath: best.filePath,
+          } as WdacFileRule);
+          fileRuleIds.push(ruleId);
+          log.push(`Path rule: ${best.filePath}`);
+        } else {
+          log.push(`Skipped path rule for temp/downloads path: ${best.filePath}`);
+        }
       }
     }
   }
 
-  log.push(`Total: ${fileRules.length} file rule(s), ${signers.length} signer(s)`);
+  log.push(`Total: ${fileRules.length} file rule(s), ${signers.length} signer rule(s)`);
 
   // Build signing scenarios
-  const userAllowedSigners: AllowedSigner[] = allowedSignerIds.map((id) => ({
-    signerId: id,
-  }));
-
-  const kernelAllowedSigners: AllowedSigner[] = kernelAllowedSignerIds.map((id) => ({
-    signerId: id,
-  }));
+  const userAllowedSigners: AllowedSigner[] = allowedSignerIds.map((id) => ({ signerId: id }));
+  const kernelAllowedSigners: AllowedSigner[] = [];
 
   const signingScenarios: WdacSigningScenario[] = [
     {

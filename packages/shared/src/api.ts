@@ -80,15 +80,45 @@ export interface MergePoliciesResponse {
   mergeLog: string[];
 }
 
+/**
+ * Rule type to generate for a specific file in the policy build step.
+ *
+ * - hash       → SHA256 Allow rule (most precise; must update per binary build)
+ * - publisher  → Signer rule using the publisher TBS hash (survives software updates)
+ * - fileAttrib → OriginalFileName-based Allow rule (broader; requires publisher scoping for security)
+ * - path       → FilePath Allow rule (broadest; weakest — bypass risk)
+ * - skip       → Exclude this file from the generated policy
+ */
+export type FileRuleType = "hash" | "publisher" | "fileAttrib" | "path" | "skip";
+
+/**
+ * Per-file rule type selection made by the user in the Build Policy UI.
+ * fileKey is the SHA256FlatHash if available, otherwise the normalized file path.
+ */
+export interface FileRuleSelection {
+  fileKey: string;
+  ruleType: FileRuleType;
+}
+
 /** POST /api/policy/from-events — generate a base policy from parsed events */
 export interface CreatePolicyFromEventsRequest {
   events: ParsedCiEvent[];
   /** Policy template to start from */
   template?: "default-windows" | "allow-microsoft" | "deny-by-default" | "blank";
   policyName: string;
-  /** If true, create publisher rules instead of hash rules where possible */
+  /**
+   * Per-file rule type overrides from the Build Policy review table.
+   * When provided these take precedence over the global fallback toggles below.
+   */
+  ruleSelections?: FileRuleSelection[];
+  /**
+   * Default rule type to use when no per-file selection is found.
+   * Defaults to 'hash' if unset.
+   */
+  defaultRuleType?: FileRuleType;
+  /** Legacy: if true and no ruleSelections are given, prefer publisher rules */
   preferPublisherRules: boolean;
-  /** If true, add path rules for file paths */
+  /** Legacy: if true and no ruleSelections are given, add path rules */
   includePathRules: boolean;
   auditMode: boolean;
 }

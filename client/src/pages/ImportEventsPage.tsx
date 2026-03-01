@@ -1,9 +1,10 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useMemo } from "react";
 import { useMutation } from "@tanstack/react-query";
 import {
   Upload, AlertCircle, CheckCircle, Clock, Shield, ShieldAlert,
   ChevronDown, ChevronRight, AlertTriangle, Hash, FileWarning,
   Server, Eye, HelpCircle, Activity, Search, File as FileIcon,
+  Key, Tag,
 } from "lucide-react";
 import clsx from "clsx";
 import { v4 as uuidv4 } from "uuid";
@@ -16,7 +17,7 @@ import type {
   ParsedCiEvent, EventImportResult,
   HuntingBinary, HuntingImportResult, HuntingImportWarning,
   HuntingRuleCandidate, HuntingRuleRisk, HuntingRuleType, HuntingSigningCoverage,
-  CreatePolicyFromEventsResponse,
+  CreatePolicyFromEventsResponse, FileRuleType, FileRuleSelection,
 } from "@appcontrol/shared";
 
 type PageTab = "ci-events" | "advanced-hunting" | "build-policy";
@@ -35,10 +36,13 @@ const FORMAT_OPTIONS = [
 function CollectionInstructions({ format }: { format: ImportFormat }) {
   const commands: Record<ImportFormat, { title: string; code: string }> = {
     "evtx-json": {
-      title: "Collect CodeIntegrity Events (PowerShell)",
-      code: `Get-WinEvent -LogName "Microsoft-Windows-CodeIntegrity/Operational" \`\n  | Where-Object { $_.Id -in @(3076,3077,3033,3034,3089,3097,3098) } \`\n  | ConvertTo-Json -Depth 5 \`\n  | Out-File -FilePath ".\\ci-events.json" -Encoding utf8`,
+      title: "Collect CodeIntegrity Events — Named-Field Format (Recommended)",
+      code: `# Exports events with named fields — hashes, publisher TBS, and file attributes are\n# correctly extracted. Pipe to a file on the monitored machine, then import here.\n\n$ids = @(3033,3034,3036,3064,3065,3076,3077,3079,3080,3082,3089,3091,3092,3111,3114)\nGet-WinEvent -LogName 'Microsoft-Windows-CodeIntegrity/Operational' -Oldest |\n  Where-Object { $_.Id -in $ids } |\n  ForEach-Object {\n    $xml = [xml]$_.ToXml()\n    $fields = @{}\n    foreach ($d in $xml.Event.EventData.Data) {\n      if ($d.Name) { $fields[$d.Name] = $d.'#text' }\n    }\n    [PSCustomObject]@{\n      EventId     = $_.Id\n      TimeCreated = $_.TimeCreated.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ss.fffZ')\n      MachineName = $_.MachineName\n      ActivityId  = if ($_.ActivityId) { $_.ActivityId.ToString('B').ToUpper() } else { $null }\n      Level       = $_.Level\n      Fields      = $fields\n    }\n  } | ConvertTo-Json -Depth 5 | Out-File -FilePath '.\\ci-events.json' -Encoding utf8`,
     },
-    json: { title: "Collect Events (JSON format)", code: `Get-WinEvent -LogName "Microsoft-Windows-CodeIntegrity/Operational" | ConvertTo-Json` },
+    json: {
+      title: "Collect Events — Legacy Positional Format",
+      code: `# Standard Get-WinEvent output — hashes are byte arrays that the parser\n# converts automatically. File attribute fields may be absent on older Windows.\n\nGet-WinEvent -LogName "Microsoft-Windows-CodeIntegrity/Operational" -Oldest |\n  Where-Object { $_.Id -in @(3076,3077,3033,3034,3089,3092) } |\n  ConvertTo-Json -Depth 5 |\n  Out-File -FilePath ".\\ci-events.json" -Encoding utf8`,
+    },
     "evtx": {
       title: "Locate your EVTX file",
       code: `# The CodeIntegrity operational log is typically at:\nC:\\Windows\\System32\\winevt\\Logs\\Microsoft-Windows-CodeIntegrity%4Operational.evtx\n\n# Or copy it first (the live log may be locked):\nwevtutil epl "Microsoft-Windows-CodeIntegrity/Operational" .\\ci-events.evtx`,
@@ -66,38 +70,85 @@ function SummaryCard({ label, value, color }: { label: string; value: number; co
   );
 }
 
+function fmtTimestamp(ts: string): string {
+  if (!ts) return "—";
+  try {
+    const d = new Date(ts);
+    if (isNaN(d.getTime())) return ts;
+    return d.toLocaleString(undefined, { dateStyle: "short", timeStyle: "medium" });
+  } catch {
+    return ts;
+  }
+}
+
+function fmtHash(h: string | undefined): string {
+  if (!h) return "—";
+  return `${h.substring(0, 16)}…`;
+}
+
 function EventRow({ event }: { event: ParsedCiEvent }) {
+  // Use sha256FlatHash (EVTX) or fall back to sha256Hash (Advanced Hunting)
+  const hash = event.sha256FlatHash ?? event.sha256Hash;
+  const publisher = event.signerInfo?.publisherName;
+  const publisherCn = publisher
+    ? (publisher.match(/CN=([^,]+)/)?.[1] ?? publisher.substring(0, 30))
+    : undefined;
+
   return (
     <tr>
       <td>
-        {event.severity === "block" ? <span className="tag-red flex items-center gap-1"><ShieldAlert size={10} />Block</span>
-          : event.severity === "audit" ? <span className="tag-yellow flex items-center gap-1"><Shield size={10} />Audit</span>
-          : <span className="tag-gray">Info</span>}
+        {event.severity === "block"
+          ? <span className="tag tag-red flex items-center gap-1"><ShieldAlert size={10} />Block</span>
+          : event.severity === "audit"
+          ? <span className="tag tag-yellow flex items-center gap-1"><Shield size={10} />Audit</span>
+          : <span className="tag tag-gray">Info</span>}
       </td>
-      <td className="mono text-xs text-text-muted whitespace-nowrap">{event.timestamp ? new Date(event.timestamp).toLocaleString() : "—"}</td>
-      <td className="text-xs">{event.machineName ?? "—"}</td>
-      <td className="text-xs max-w-xs truncate" title={event.filePath}>{event.filePath}</td>
-      <td className="mono text-xs text-text-muted">{event.sha256Hash ? `${event.sha256Hash.substring(0, 16)}…` : "—"}</td>
-      <td className="mono text-xs">{event.eventId}</td>
+      <td className="mono text-xs text-text-muted whitespace-nowrap">{fmtTimestamp(event.timestamp)}</td>
+      <td className="text-xs text-text-secondary truncate max-w-[120px]" title={event.machineName}>{event.machineName ?? "—"}</td>
+      <td className="text-xs max-w-xs">
+        <p className="truncate" title={event.filePath}>{event.fileName ?? event.filePath}</p>
+        {event.productName && <p className="text-text-muted truncate text-[10px]">{event.productName}</p>}
+      </td>
+      <td className="mono text-xs text-text-muted">{fmtHash(hash)}</td>
+      <td className="text-xs">
+        {publisherCn
+          ? <span className="flex items-center gap-1 text-accent-blue"><Key size={10} className="flex-shrink-0" /><span className="truncate max-w-[120px]" title={publisher}>{publisherCn}</span></span>
+          : event.originalFileName
+          ? <span className="flex items-center gap-1 text-text-secondary"><Tag size={10} /><span className="truncate max-w-[120px]">{event.originalFileName}</span></span>
+          : <span className="text-text-muted">Unsigned</span>}
+      </td>
+      <td className="mono text-xs text-text-muted">{event.eventId}</td>
     </tr>
   );
 }
 
 function EventImportResults({ result }: { result: EventImportResult }) {
   const { summary, events, parseErrors } = result;
+
+  const fmtTime = (ts: string) => {
+    try { return new Date(ts).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" }); }
+    catch { return ts; }
+  };
+
+  const withPublisher = events.filter((e) => e.signerInfo?.publisherName).length;
+
   return (
     <div className="space-y-4">
       <div className="card p-4">
         <h2 className="section-header">Import Summary</h2>
-        <div className="grid grid-cols-4 gap-3">
+        <div className="grid grid-cols-5 gap-3">
           <SummaryCard label="Total Events" value={summary.totalEvents} />
           <SummaryCard label="Block Events" value={summary.blockEvents} color="red" />
           <SummaryCard label="Audit Events" value={summary.auditEvents} color="yellow" />
           <SummaryCard label="Unique Files" value={summary.uniqueFiles} color="blue" />
+          <SummaryCard label="With Publisher" value={withPublisher} color="green" />
         </div>
         {summary.timeRange && (
-          <p className="text-xs text-text-muted mt-3 flex items-center gap-1">
-            <Clock size={11} />{summary.timeRange.earliest} — {summary.timeRange.latest}
+          <p className="text-xs text-text-muted mt-3 flex items-center gap-1.5">
+            <Clock size={11} />
+            <span>{fmtTime(summary.timeRange.earliest)}</span>
+            <span>—</span>
+            <span>{fmtTime(summary.timeRange.latest)}</span>
           </p>
         )}
       </div>
@@ -110,16 +161,24 @@ function EventImportResults({ result }: { result: EventImportResult }) {
                 {err.line !== undefined && <span className="mono mr-2">L{err.line}</span>}{err.message}
               </p>
             ))}
-            {parseErrors.length > 10 && <p className="text-xs text-text-muted italic">...and {parseErrors.length - 10} more</p>}
+            {parseErrors.length > 10 && <p className="text-xs text-text-muted italic">…and {parseErrors.length - 10} more</p>}
           </div>
         </div>
       )}
       <div className="card p-4">
         <h2 className="section-header">Events ({events.length})</h2>
-        <div className="overflow-auto max-h-96">
+        <div className="overflow-auto max-h-[480px]">
           <table className="data-table">
             <thead className="sticky top-0 bg-surface-1">
-              <tr><th>Severity</th><th>Time</th><th>Machine</th><th>File</th><th>Hash (SHA256)</th><th>Event ID</th></tr>
+              <tr>
+                <th>Severity</th>
+                <th>Time</th>
+                <th>Machine</th>
+                <th>File / Product</th>
+                <th>SHA256 (flat)</th>
+                <th>Publisher / Filename</th>
+                <th>Event ID</th>
+              </tr>
             </thead>
             <tbody>{events.map((event, i) => <EventRow key={i} event={event} />)}</tbody>
           </table>
@@ -780,14 +839,196 @@ function BuildResult({ result }: { result: CreatePolicyFromEventsResponse }) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Unique file grouping helper (mirrors server-side logic)
+// ---------------------------------------------------------------------------
+
+interface UniqueFileRow {
+  key: string;
+  filePath: string;
+  fileName?: string;
+  productName?: string;
+  originalFileName?: string;
+  sha256FlatHash?: string;
+  sha256Hash?: string;
+  publisherName?: string;
+  publisherTbsHash?: string;
+  hasHash: boolean;
+  hasPublisher: boolean;
+  hasAttributes: boolean;
+  severity: "block" | "audit" | "info";
+  eventCount: number;
+}
+
+function buildUniqueFiles(events: ParsedCiEvent[]): UniqueFileRow[] {
+  const map = new Map<string, UniqueFileRow>();
+  for (const ev of events) {
+    const key = ev.sha256FlatHash ?? ev.sha256Hash ?? ev.filePath.toLowerCase();
+    const existing = map.get(key);
+    if (existing) {
+      existing.eventCount++;
+      if (!existing.publisherName && ev.signerInfo?.publisherName) {
+        existing.publisherName = ev.signerInfo.publisherName;
+        existing.publisherTbsHash = ev.signerInfo.publisherTbsHash;
+        existing.hasPublisher = true;
+      }
+      if (!existing.originalFileName && ev.originalFileName) {
+        existing.originalFileName = ev.originalFileName;
+        existing.hasAttributes = true;
+      }
+    } else {
+      const hasHash = !!(ev.sha256FlatHash ?? ev.sha256Hash);
+      const hasPublisher = !!(ev.signerInfo?.publisherTbsHash ?? ev.signerInfo?.publisherName);
+      const hasAttributes = !!(ev.originalFileName ?? ev.productName);
+      map.set(key, {
+        key,
+        filePath: ev.filePath,
+        fileName: ev.fileName,
+        productName: ev.productName,
+        originalFileName: ev.originalFileName,
+        sha256FlatHash: ev.sha256FlatHash,
+        sha256Hash: ev.sha256Hash,
+        publisherName: ev.signerInfo?.publisherName,
+        publisherTbsHash: ev.signerInfo?.publisherTbsHash,
+        hasHash,
+        hasPublisher,
+        hasAttributes,
+        severity: ev.severity,
+        eventCount: 1,
+      });
+    }
+  }
+  return Array.from(map.values());
+}
+
+// ---------------------------------------------------------------------------
+// Rule type selector for a single file row
+// ---------------------------------------------------------------------------
+
+const RULE_TYPE_OPTIONS: { value: FileRuleType; label: string; desc: string }[] = [
+  { value: "publisher", label: "Publisher",    desc: "Certificate TBS — survives updates" },
+  { value: "fileAttrib", label: "FileName",    desc: "OriginalFileName match" },
+  { value: "hash",       label: "Hash",        desc: "SHA256 exact match" },
+  { value: "path",       label: "Path",        desc: "File path (weakest)" },
+  { value: "skip",       label: "Skip",        desc: "Exclude from policy" },
+];
+
+function defaultRuleTypeForFile(row: UniqueFileRow, preferPublisher: boolean): FileRuleType {
+  if (preferPublisher && row.hasPublisher) return "publisher";
+  if (row.hasHash) return "hash";
+  return "path";
+}
+
+function FileRuleRow({
+  row,
+  ruleType,
+  onChange,
+}: {
+  row: UniqueFileRow;
+  ruleType: FileRuleType;
+  onChange: (key: string, type: FileRuleType) => void;
+}) {
+  const hash = row.sha256FlatHash ?? row.sha256Hash;
+  const publisherCn = row.publisherName
+    ? (row.publisherName.match(/CN=([^,]+)/)?.[1] ?? row.publisherName.substring(0, 28))
+    : undefined;
+
+  return (
+    <tr>
+      <td>
+        {row.severity === "block"
+          ? <span className="tag tag-red flex items-center gap-1 w-fit"><ShieldAlert size={9} />Block</span>
+          : <span className="tag tag-yellow flex items-center gap-1 w-fit"><Shield size={9} />Audit</span>}
+      </td>
+      <td className="text-xs max-w-[180px]">
+        <p className="truncate font-medium text-text-primary" title={row.filePath}>{row.fileName ?? row.filePath}</p>
+        {row.productName && <p className="text-text-muted truncate text-[10px]">{row.productName}</p>}
+      </td>
+      <td className="text-xs">
+        {publisherCn
+          ? <span className="flex items-center gap-1 text-accent-blue"><Key size={10} /><span className="truncate max-w-[140px]" title={row.publisherName}>{publisherCn}</span></span>
+          : row.originalFileName
+          ? <span className="flex items-center gap-1 text-text-secondary"><Tag size={10} />{row.originalFileName}</span>
+          : <span className="text-text-muted italic">Unsigned</span>}
+      </td>
+      <td className="mono text-xs text-text-muted">{hash ? `${hash.substring(0, 14)}…` : "—"}</td>
+      <td>
+        <div className="flex gap-1 flex-wrap">
+          {row.hasPublisher && <span className="tag tag-blue text-[10px]">Pub</span>}
+          {row.hasAttributes && <span className="tag tag-gray text-[10px]">Attr</span>}
+          {row.hasHash && <span className="tag tag-gray text-[10px]">Hash</span>}
+        </div>
+      </td>
+      <td>
+        <select
+          value={ruleType}
+          onChange={(e) => onChange(row.key, e.target.value as FileRuleType)}
+          className="bg-surface-2 border border-border rounded px-2 py-1 text-xs text-text-primary focus:outline-none focus:border-accent-blue"
+        >
+          {RULE_TYPE_OPTIONS.filter((opt) => {
+            if (opt.value === "publisher" && !row.hasPublisher) return false;
+            if (opt.value === "fileAttrib" && !row.hasAttributes) return false;
+            if (opt.value === "hash" && !row.hasHash) return false;
+            return true;
+          }).map((opt) => (
+            <option key={opt.value} value={opt.value} title={opt.desc}>{opt.label}</option>
+          ))}
+          <option value="skip">Skip</option>
+        </select>
+      </td>
+    </tr>
+  );
+}
+
 function BuildPolicyTab({ onSwitchToCiEvents }: { onSwitchToCiEvents: () => void }) {
   const { importedEvents, addSession } = useAppStore();
-  const [options, setOptions] = useState({ policyName: "Generated Policy", template: "blank" as Template, preferPublisherRules: true, includePathRules: false, auditMode: true });
+  const [options, setOptions] = useState({
+    policyName: "Generated Policy",
+    template: "blank" as Template,
+    auditMode: true,
+    preferPublisherRules: true,
+  });
+  const [ruleOverrides, setRuleOverrides] = useState<Map<string, FileRuleType>>(new Map());
   const [result, setResult] = useState<CreatePolicyFromEventsResponse | null>(null);
 
+  const uniqueFiles = useMemo(() => buildUniqueFiles(importedEvents), [importedEvents]);
+
+  // Resolved rule type per file (override → default)
+  const resolvedType = (row: UniqueFileRow): FileRuleType =>
+    ruleOverrides.get(row.key) ?? defaultRuleTypeForFile(row, options.preferPublisherRules);
+
+  const setAllRules = (type: FileRuleType) => {
+    const next = new Map<string, FileRuleType>();
+    uniqueFiles.forEach((f) => next.set(f.key, type));
+    setRuleOverrides(next);
+  };
+
   const buildMutation = useMutation({
-    mutationFn: () => policyApi.fromEvents({ events: importedEvents, policyName: options.policyName, template: options.template, preferPublisherRules: options.preferPublisherRules, includePathRules: options.includePathRules, auditMode: options.auditMode }),
-    onSuccess: (data) => { setResult(data); addSession({ id: uuidv4(), fileName: `${options.policyName}.xml`, policy: data.policy, xml: data.xml, loadedAt: new Date().toISOString() }); },
+    mutationFn: () => {
+      const ruleSelections: FileRuleSelection[] = uniqueFiles.map((f) => ({
+        fileKey: f.key,
+        ruleType: resolvedType(f),
+      }));
+      return policyApi.fromEvents({
+        events: importedEvents,
+        policyName: options.policyName,
+        template: options.template,
+        ruleSelections,
+        preferPublisherRules: options.preferPublisherRules,
+        includePathRules: false,
+        auditMode: options.auditMode,
+      });
+    },
+    onSuccess: (data) => {
+      setResult(data);
+      addSession({
+        id: uuidv4(),
+        fileName: `${options.policyName}.xml`,
+        policy: data.policy,
+        xml: data.xml,
+        loadedAt: new Date().toISOString(),
+      });
+    },
   });
 
   if (importedEvents.length === 0) {
@@ -803,53 +1044,127 @@ function BuildPolicyTab({ onSwitchToCiEvents }: { onSwitchToCiEvents: () => void
     );
   }
 
+  const ruleTypeSummary = {
+    publisher: uniqueFiles.filter((f) => resolvedType(f) === "publisher").length,
+    fileAttrib: uniqueFiles.filter((f) => resolvedType(f) === "fileAttrib").length,
+    hash: uniqueFiles.filter((f) => resolvedType(f) === "hash").length,
+    path: uniqueFiles.filter((f) => resolvedType(f) === "path").length,
+    skip: uniqueFiles.filter((f) => resolvedType(f) === "skip").length,
+  };
+
   return (
     <div className="flex-1 overflow-auto p-6">
-      <div className="max-w-2xl space-y-5">
+      <div className="max-w-4xl space-y-5">
+        {/* Header row */}
         <div className="flex items-center justify-between">
-          <p className="text-xs text-text-muted">{importedEvents.length} events available</p>
-          <button className="btn-primary" onClick={() => buildMutation.mutate()} disabled={buildMutation.isPending || !options.policyName.trim()}>
-            <Activity size={13} />{buildMutation.isPending ? "Building..." : "Build Policy"}
+          <div>
+            <p className="text-xs text-text-muted">{importedEvents.length} events · {uniqueFiles.length} unique files</p>
+          </div>
+          <button
+            className="btn-primary"
+            onClick={() => buildMutation.mutate()}
+            disabled={buildMutation.isPending || !options.policyName.trim() || ruleTypeSummary.skip === uniqueFiles.length}
+          >
+            <Activity size={13} />{buildMutation.isPending ? "Building…" : "Build Policy"}
           </button>
         </div>
+
+        {/* Policy settings */}
         <div className="card p-4">
           <h2 className="section-header">Policy Settings</h2>
-          <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="text-xs font-medium text-text-secondary block mb-1.5">Policy Name</label>
-              <input className="input" value={options.policyName} onChange={(e) => setOptions((o) => ({ ...o, policyName: e.target.value }))} placeholder="My WDAC Policy" maxLength={256} />
+              <input className="input" value={options.policyName}
+                onChange={(e) => setOptions((o) => ({ ...o, policyName: e.target.value }))}
+                placeholder="My WDAC Policy" maxLength={256} />
             </div>
-            <div>
-              <label className="text-xs font-medium text-text-secondary block mb-2">Base Template</label>
-              <div className="grid grid-cols-2 gap-2">
-                {TEMPLATES.map((t) => (
-                  <button key={t.id} onClick={() => setOptions((o) => ({ ...o, template: t.id }))}
-                    className={clsx("text-left p-3 rounded border text-xs transition-colors", options.template === t.id ? "border-accent-blue bg-accent-blue-dim/20" : "border-border hover:border-border-strong")}>
-                    <p className="font-medium text-text-primary mb-0.5">{t.label}</p>
-                    <p className="text-text-muted">{t.description}</p>
-                  </button>
+            <div className="flex items-end gap-3">
+              <Toggle
+                label="Start in Audit Mode"
+                description="Option 3 — recommended for initial testing."
+                checked={options.auditMode}
+                onChange={(v) => setOptions((o) => ({ ...o, auditMode: v }))}
+              />
+            </div>
+          </div>
+          <div className="mt-3">
+            <label className="text-xs font-medium text-text-secondary block mb-2">Base Template</label>
+            <div className="grid grid-cols-4 gap-2">
+              {TEMPLATES.map((t) => (
+                <button key={t.id} onClick={() => setOptions((o) => ({ ...o, template: t.id }))}
+                  className={clsx("text-left p-2.5 rounded border text-xs transition-colors",
+                    options.template === t.id ? "border-accent-blue bg-accent-blue-dim/20" : "border-border hover:border-border-strong")}>
+                  <p className="font-medium text-text-primary mb-0.5">{t.label}</p>
+                  <p className="text-text-muted text-[10px] leading-tight">{t.description}</p>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* File rule type selection table */}
+        <div className="card p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="section-header mb-0">File Rule Selection ({uniqueFiles.length} files)</h2>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-text-muted">Set all:</span>
+              <select
+                onChange={(e) => {
+                  if (e.target.value) setAllRules(e.target.value as FileRuleType);
+                  e.target.value = "";
+                }}
+                defaultValue=""
+                className="bg-surface-2 border border-border rounded px-2 py-1 text-xs text-text-primary focus:outline-none focus:border-accent-blue"
+              >
+                <option value="" disabled>Select…</option>
+                <option value="publisher">All → Publisher</option>
+                <option value="hash">All → Hash</option>
+                <option value="fileAttrib">All → FileName</option>
+                <option value="path">All → Path</option>
+                <option value="skip">All → Skip</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Rule type summary chips */}
+          <div className="flex gap-2 mb-3 flex-wrap">
+            {ruleTypeSummary.publisher > 0 && <span className="tag tag-blue text-xs">{ruleTypeSummary.publisher} Publisher</span>}
+            {ruleTypeSummary.fileAttrib > 0 && <span className="tag tag-gray text-xs">{ruleTypeSummary.fileAttrib} FileName</span>}
+            {ruleTypeSummary.hash > 0 && <span className="tag tag-gray text-xs">{ruleTypeSummary.hash} Hash</span>}
+            {ruleTypeSummary.path > 0 && <span className="tag tag-yellow text-xs">{ruleTypeSummary.path} Path</span>}
+            {ruleTypeSummary.skip > 0 && <span className="tag tag-red text-xs">{ruleTypeSummary.skip} Skipped</span>}
+          </div>
+
+          <div className="overflow-auto max-h-[400px]">
+            <table className="data-table">
+              <thead className="sticky top-0 bg-surface-1">
+                <tr>
+                  <th>Severity</th>
+                  <th>File / Product</th>
+                  <th>Publisher / Filename</th>
+                  <th>SHA256 (flat)</th>
+                  <th>Available</th>
+                  <th>Rule Type</th>
+                </tr>
+              </thead>
+              <tbody>
+                {uniqueFiles.map((row) => (
+                  <FileRuleRow
+                    key={row.key}
+                    row={row}
+                    ruleType={resolvedType(row)}
+                    onChange={(key, type) =>
+                      setRuleOverrides((prev) => new Map(prev).set(key, type))
+                    }
+                  />
                 ))}
-              </div>
-            </div>
+              </tbody>
+            </table>
           </div>
         </div>
-        <div className="card p-4">
-          <h2 className="section-header">Rule Generation</h2>
-          <div className="space-y-3">
-            <Toggle label="Prefer Publisher Rules" description="When signer info is available, create certificate publisher rules instead of hash rules. Publisher rules are more maintainable across software updates." checked={options.preferPublisherRules} onChange={(v) => setOptions((o) => ({ ...o, preferPublisherRules: v }))} />
-            <Toggle label="Include Path Rules" description="Add file path-based allow rules. Use with caution — path rules are weaker than hash or publisher rules and can be bypassed by placing malicious files at the same path." checked={options.includePathRules} onChange={(v) => setOptions((o) => ({ ...o, includePathRules: v }))} warning />
-            <Toggle label="Start in Audit Mode" description="Generate the policy with Enabled:Audit Mode (Option 3). Recommended for initial testing — deploy in audit mode, verify no legitimate software is blocked, then switch to enforcement." checked={options.auditMode} onChange={(v) => setOptions((o) => ({ ...o, auditMode: v }))} />
-          </div>
-        </div>
-        <div className="card p-4">
-          <h2 className="section-header">Event Inputs</h2>
-          <div className="grid grid-cols-3 gap-3 text-center">
-            <div className="bg-surface-2 rounded p-2"><p className="text-xl font-bold mono text-text-primary">{importedEvents.length}</p><p className="text-xs text-text-muted">Total Events</p></div>
-            <div className="bg-surface-2 rounded p-2"><p className="text-xl font-bold mono text-accent-red">{importedEvents.filter((e) => e.severity === "block").length}</p><p className="text-xs text-text-muted">Block Events</p></div>
-            <div className="bg-surface-2 rounded p-2"><p className="text-xl font-bold mono text-accent-yellow">{importedEvents.filter((e) => e.severity === "audit").length}</p><p className="text-xs text-text-muted">Audit Events</p></div>
-          </div>
-        </div>
-        {buildMutation.isPending && <div className="flex justify-center py-8"><LoadingSpinner label="Building policy rules..." /></div>}
+
+        {buildMutation.isPending && <div className="flex justify-center py-8"><LoadingSpinner label="Building policy rules…" /></div>}
         {buildMutation.isError && (
           <div className="p-4 bg-accent-red-dim/30 border border-accent-red/20 rounded text-sm text-accent-red flex items-center gap-2">
             <AlertCircle size={14} />{(buildMutation.error as Error).message}

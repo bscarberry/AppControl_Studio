@@ -97,11 +97,33 @@ eventsRouter.post("/parse-evtx", upload.single("file"), async (req: Request, res
     await fs.writeFile(tmpPath, req.file.buffer);
 
     const json = await new Promise<string>((resolve, reject) => {
+      // Use the named-field format so hashes, publisher TBS, and file attributes are
+      // correctly extracted. The $event.ToXml() approach gives named Data elements
+      // with binary data (hashes) already encoded as hex strings.
+      const psCommand = [
+        `$ids = @(3033,3034,3036,3064,3065,3076,3077,3079,3080,3082,3089,3091,3092,3111,3114)`,
+        `Get-WinEvent -Path '${tmpPath}' -Oldest -ErrorAction SilentlyContinue |`,
+        `  Where-Object { $_.Id -in $ids } |`,
+        `  ForEach-Object {`,
+        `    $xml = [xml]$_.ToXml()`,
+        `    $fields = @{}`,
+        `    foreach ($d in $xml.Event.EventData.Data) { if ($d.Name) { $fields[$d.Name] = $d.'#text' } }`,
+        `    [PSCustomObject]@{`,
+        `      EventId     = $_.Id`,
+        `      TimeCreated = $_.TimeCreated.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ss.fffZ')`,
+        `      MachineName = $_.MachineName`,
+        `      ActivityId  = if ($_.ActivityId) { $_.ActivityId.ToString('B').ToUpper() } else { $null }`,
+        `      Level       = $_.Level`,
+        `      Fields      = $fields`,
+        `    }`,
+        `  } | ConvertTo-Json -Depth 5`,
+      ].join(" ");
+
       const ps = spawn("powershell.exe", [
         "-NoProfile",
         "-NonInteractive",
         "-Command",
-        `Get-WinEvent -Path '${tmpPath}' -Oldest -ErrorAction SilentlyContinue | ConvertTo-Json -Depth 5`,
+        psCommand,
       ]);
 
       let stdout = "";

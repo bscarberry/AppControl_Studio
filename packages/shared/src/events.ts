@@ -92,7 +92,7 @@ export type EventSeverity = "block" | "audit" | "info";
 export interface ParsedCiEvent {
   /** Source event ID */
   eventId: number;
-  /** UTC timestamp */
+  /** UTC ISO-8601 timestamp */
   timestamp: string;
   /** Machine/device name */
   machineName?: string;
@@ -100,42 +100,80 @@ export interface ParsedCiEvent {
   requestingProcess?: string;
   requestingProcessId?: number;
 
+  /** Windows Event Log correlation activity ID — used to link 3089 signer events to 3076/3077 events */
+  correlationId?: string;
+
   /** File that was blocked/audited */
   filePath: string;
   fileName?: string;
 
-  /** SHA256 authenticode hash */
-  sha256Hash?: string;
-  /** SHA1 authenticode hash */
-  sha1Hash?: string;
-  /** SHA256 of the file page hashes */
-  sha256FlatHash?: string;
+  // -------------------------------------------------------------------------
+  // Cryptographic hashes
+  //
+  // For events 3076/3077 (and related), the EVTX property layout is:
+  //   [5] Sha1FlatHash  (byte[20]) — SHA1 of the flat file
+  //   [6] Sha256FlatHash (byte[32]) — SHA256 of the flat file  ← primary hash for policy rules
+  //   [7] Sha1PageHash  (byte[20]) — SHA1 of page hashes
+  //   [8] Sha256PageHash (byte[32]) — SHA256 of page hashes
+  //
+  // The "FlatHash" fields are what Microsoft uses in WDAC policy XML <Allow Hash="...">.
+  // Legacy field sha256Hash is preserved for backwards compatibility with Advanced Hunting rows.
+  // -------------------------------------------------------------------------
 
-  /** Signer information from the event */
+  /** SHA256 flat hash (primary policy hash — use this for Allow/Deny rules) */
+  sha256FlatHash?: string;
+  /** SHA1 flat hash */
+  sha1FlatHash?: string;
+  /** SHA256 page hash */
+  sha256PageHash?: string;
+  /** SHA1 page hash */
+  sha1PageHash?: string;
+  /**
+   * Legacy: SHA256 hash from Advanced Hunting rows (DeviceFileCertificateInfo.SHA256).
+   * For EVTX events, prefer sha256FlatHash.
+   */
+  sha256Hash?: string;
+  /** Legacy SHA1 (Advanced Hunting). For EVTX events prefer sha1FlatHash. */
+  sha1Hash?: string;
+
+  /**
+   * Signer information — populated by correlating 3089 "signature info" events
+   * with their parent 3076/3077 events via the Windows Event Log Correlation ActivityID.
+   */
   signerInfo?: {
     publisherName?: string;
     issuerName?: string;
     notValidAfter?: string;
     notValidBefore?: string;
+    /** TBS hash of the publisher/leaf certificate — used as CertRoot in WDAC signer rules */
+    publisherTbsHash?: string;
+    /** TBS hash of the issuer certificate */
+    issuerTbsHash?: string;
+    /** Total number of signatures on the file (from 3089.TotalSignatureCount) */
+    totalSignatureCount?: number;
+    /** Index of this signature (0-based, from 3089.SignatureIndex) */
+    signatureIndex?: number;
+    /** Legacy fields kept for Advanced Hunting compatibility */
     thumbprint?: string;
-    /** TBS hash of the leaf certificate */
     leafCertTbs?: string;
-    /** TBS hash of the root certificate */
     rootCertTbs?: string;
   };
 
-  /** Product name from the file's version info */
+  // -------------------------------------------------------------------------
+  // File version resource fields
+  // Populated from EVTX properties for events 3076/3077 (props[13–18]):
+  //   [13] OriginalFilename, [14] InternalName, [15] FileDescription,
+  //   [16] ProductName, [17] FileVersion, [18] PackageFamilyName
+  // -------------------------------------------------------------------------
   productName?: string;
-  /** Original file name from the file's version info */
   originalFileName?: string;
-  /** Internal name from the file's version info */
   internalName?: string;
-  /** File description from the file's version info */
   fileDescription?: string;
-  /** File version */
   fileVersion?: string;
+  /** UWP / MSIX package family name (for packaged-app allow rules) */
+  packageFamilyName?: string;
 
-  /** PolicyGUID that generated this audit event */
+  /** PolicyGUID that generated this audit/block event */
   policyGuid?: string;
   policyName?: string;
 
