@@ -27,6 +27,64 @@ npm run build
 
 ---
 
+## Authentication (MSAL / Azure AD)
+
+Authentication is **opt-in**. By default the app runs in local workstation mode with no sign-in required. To enforce Azure AD authentication, configure the environment variables below.
+
+### Prerequisites
+
+Create an Azure AD App Registration with the following settings:
+
+| Setting | Value |
+|---------|-------|
+| **Supported account types** | Accounts in this organizational directory only (single tenant) |
+| **Platform** | Single-page application (SPA) |
+| **Redirect URI** | `http://localhost:5173` (dev) or your production URL |
+| **Expose an API → Scope** | Add a scope named `access_as_user`; its full URI will be `api://<Application ID>/access_as_user` |
+| **API Permissions** | No Microsoft Graph permissions are needed — the app only calls its own backend |
+
+> You can find the **Application (client) ID** and **Directory (tenant) ID** on the Overview page of your app registration in the Azure portal.
+
+### Client configuration
+
+Copy `client/.env.example` to `client/.env` (or `client/.env.local`) and fill in:
+
+```env
+VITE_MSAL_CLIENT_ID=00000000-0000-0000-0000-000000000000   # Application (client) ID
+VITE_MSAL_TENANT_ID=00000000-0000-0000-0000-000000000000   # Directory (tenant) ID
+VITE_MSAL_REDIRECT_URI=http://localhost:5173                # Must match a registered Redirect URI
+VITE_MSAL_API_SCOPE=api://<client-id>/access_as_user       # Optional — derived from client ID if omitted
+```
+
+### Server configuration
+
+Copy `server/.env.example` to `server/.env` and fill in:
+
+```env
+MSAL_CLIENT_ID=00000000-0000-0000-0000-000000000000   # Same Application (client) ID
+MSAL_TENANT_ID=00000000-0000-0000-0000-000000000000   # Same Directory (tenant) ID
+```
+
+The server uses these to validate Azure AD JWTs — it fetches Microsoft's public signing keys from:
+`https://login.microsoftonline.com/<tenant-id>/discovery/v2.0/keys`
+
+No client secret is needed; the SPA uses the public PKCE flow.
+
+### How it works
+
+1. On first visit, unauthenticated users see a **Sign in with Microsoft** page
+2. Clicking the button opens a Microsoft login popup (no full-page redirect)
+3. After successful login, MSAL stores the session in `sessionStorage`
+4. Every API call automatically attaches `Authorization: Bearer <access-token>`
+5. The server validates the JWT signature, issuer, audience, and expiry before processing any request
+6. The signed-in username is displayed in the sidebar footer with a sign-out button
+
+### Local workstation mode (no authentication)
+
+Leave `VITE_MSAL_CLIENT_ID` and `MSAL_CLIENT_ID` unset (or empty) to disable authentication entirely. All API requests are treated as `admin` role — appropriate for a single-user local machine where network access is already restricted to `127.0.0.1`.
+
+---
+
 ## Features
 
 ### Policy Editor
@@ -89,9 +147,14 @@ AppControl_Studio/
 │       └── api.ts             # API request/response types
 │
 ├── server/                    # Node.js + Express backend
+│   ├── .env.example           # MSAL + server environment variable template
 │   └── src/
 │       ├── app.ts             # Express server (port 3001)
 │       ├── routes/            # API route handlers
+│       ├── middleware/
+│       │   ├── msal-auth.ts   # Azure AD JWT validation (RS256 + JWKS)
+│       │   ├── rbac.ts        # Role-based access control
+│       │   └── error-handler.ts
 │       ├── services/
 │       │   ├── xml-parser.ts      # SiPolicy XML → WdacPolicy
 │       │   ├── xml-generator.ts   # WdacPolicy → SiPolicy XML
@@ -102,10 +165,15 @@ AppControl_Studio/
 │       └── __tests__/         # Jest tests
 │
 ├── client/                    # React + TypeScript frontend
+│   ├── .env.example           # MSAL environment variable template
 │   └── src/
-│       ├── pages/             # 5 main pages
-│       ├── components/        # Reusable UI components
-│       ├── lib/api.ts         # Typed API client
+│       ├── pages/             # Main pages (editor, simulator, etc.)
+│       ├── components/
+│       │   ├── auth/          # AuthGuard — gates app behind MSAL
+│       │   └── ...            # Reusable UI components
+│       ├── lib/
+│       │   ├── api.ts         # Typed API client (attaches Bearer token)
+│       │   └── msal-config.ts # MSAL PublicClientApplication setup
 │       └── store/             # Zustand global state
 │
 └── fixtures/                  # Sample data for testing
@@ -196,7 +264,9 @@ Export as JSON or CSV from the Microsoft Defender portal.
 | State | Zustand |
 | API calls | TanStack Query |
 | Routing | React Router v6 |
+| Authentication | MSAL (`@azure/msal-browser`, `@azure/msal-react`) |
 | Backend | Node.js, Express, TypeScript |
+| JWT validation | `jwks-rsa`, `jsonwebtoken` |
 | XML parsing | fast-xml-parser |
 | Validation | Zod |
 | Icons | Lucide React |
@@ -205,13 +275,15 @@ Export as JSON or CSV from the Microsoft Defender portal.
 
 ## Security Design
 
-- **Local only** — server binds to `127.0.0.1`, no external network calls
-- **CSP headers** via Helmet
-- **CORS** restricted to the dev server origin
+- **Local only** — server binds to `127.0.0.1`, no external network calls during policy processing
+- **MSAL authentication** — optional Azure AD sign-in; access tokens validated server-side via Microsoft's JWKS endpoint (RS256, audience + issuer checked)
+- **CSP headers** via Helmet; Microsoft login endpoints added to `connectSrc`/`frameSrc` only when MSAL is active
+- **CORS** restricted to the configured client origin
 - **50 MB payload limit** to prevent DoS
 - **Zod validation** on all API inputs
 - **No eval** — XML parsed safely with fast-xml-parser
 - **No filesystem writes** — files are read via the browser File API
+- **Append-only audit log** — all authentication events (success/failure) are recorded
 
 ---
 
