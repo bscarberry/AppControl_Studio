@@ -13,43 +13,71 @@
 
 export const CI_EVENT_IDS = {
   // -------------------------------------------------------------------------
-  // Kernel-mode signing / driver integrity violations
+  // Kernel-mode signing / driver integrity violations (block)
+  // Source: MS Learn "Understanding App Control event IDs" appendix
   // -------------------------------------------------------------------------
-  3001: "Code Integrity detected an unsigned driver. The driver was not loaded.",
-  3002: "Code Integrity is unable to verify the image integrity of a file because the set of per-page image hashes could not be found on the system.",
-  3003: "Code Integrity determined that a process attempted to load a kernel module that did not meet the security requirements for Shared Sections.",
-  3004: "Code Integrity is unable to verify the image integrity of a file because the file hash could not be found on the system.",
-  3010: "Code Integrity is unable to load the %2 catalog.",
-  3023: "Code Integrity determined that a process attempted to load a binary that did not pass code signing requirements (revoked or lifetime-signing EKU expired).",
+  3001: "An unsigned driver was attempted to load on the system.",
+  3002: "Code Integrity couldn't verify the boot image as the page hash couldn't be found.",
+  // NOTE: 3003 does NOT appear in Microsoft's official event ID appendix and has been removed.
+  3004: "Code Integrity couldn't verify the file as the page hash couldn't be found. May indicate a kernel driver with invalid signature or /INTEGRITYCHECK code that isn't signed correctly.",
+  3010: "The catalog containing the signature for the file under validation is invalid.",
+  3023: "The driver file under validation didn't meet the requirements to pass the App Control policy. Often caused by a revoked signature or an expired Lifetime Signing EKU.",
 
   // -------------------------------------------------------------------------
-  // Kernel-mode App Control enforcement / audit
+  // Revocation-related (block)
   // -------------------------------------------------------------------------
-  3033: "Code Integrity determined that a process attempted to load a binary that did not meet the signing requirements. The binary was blocked.",
-  3034: "Code Integrity determined that a process attempted to load a binary that did not meet the signing requirements. The binary would have been blocked if the policy were enforced (audit mode).",
+  3026: "Microsoft or the certificate issuing authority revoked the certificate that signed the catalog.",
+  3032: "The file under validation is revoked or the file has a signature that is revoked.",
+  3036: "Microsoft or the certificate issuing authority revoked the certificate that signed the file being validated.",
 
   // -------------------------------------------------------------------------
-  // User-mode App Control audit (policy in audit mode — file NOT blocked)
+  // Kernel-mode App Control — enforcement and audit
   // -------------------------------------------------------------------------
-  3076: "App Control policy audit: the file would have been blocked if the policy were in enforcement mode.",
+  3033: "The file under validation didn't meet the requirements to pass the App Control policy. May occur alongside a 3077 event if caused by App Control; often a revoked or Lifetime Signing EKU-expired signature.",
+  3034: "The file under validation wouldn't meet the requirements to pass the App Control policy if it was enforced. The file was allowed since the policy is in audit mode.",
 
   // -------------------------------------------------------------------------
-  // User-mode App Control enforcement (policy enforced — file IS blocked)
+  // User-mode DLL enforcement and audit
   // -------------------------------------------------------------------------
-  3077: "App Control policy enforcement: the file did not pass the policy and was blocked from loading.",
+  3064: "If the App Control policy was enforced, a user mode DLL under validation wouldn't meet the requirements to pass the App Control policy. The DLL was allowed since the policy is in audit mode.",
+  3065: "A user mode DLL under validation didn't meet the requirements to pass the App Control policy.",
 
   // -------------------------------------------------------------------------
-  // Supplemental / correlated events
+  // User-mode App Control — audit (policy in audit mode, file NOT blocked)
   // -------------------------------------------------------------------------
-  3089: "Signature information for a file that triggered a 3076 or 3077 event (one 3089 per signature on the file).",
-  3099: "An App Control policy was loaded or refreshed on the system.",
+  3076: "This event is the main App Control block event for audit mode policies. It indicates that the file would have been blocked if the policy was enforced.",
+
+  // -------------------------------------------------------------------------
+  // User-mode App Control — enforcement (policy enforced, file IS blocked)
+  // -------------------------------------------------------------------------
+  3077: "This event is the main App Control block event for enforced policies. It indicates that the file didn't pass your policy and was blocked.",
+
+  // -------------------------------------------------------------------------
+  // Additional file-control events — enforcement and audit
+  // -------------------------------------------------------------------------
+  3079: "The file under validation didn't meet the requirements to pass the App Control policy.",
+  3080: "If the App Control policy was in enforced mode, the file under validation wouldn't have met the requirements to pass the App Control policy.",
+  3081: "The file under validation didn't meet the requirements to pass the App Control policy.",
+  3082: "If the App Control policy was enforced, the policy would have blocked this non-WHQL driver.",
+
+  // -------------------------------------------------------------------------
+  // HVCI / Dynamic Code Security (block)
+  // -------------------------------------------------------------------------
+  3111: "The file under validation didn't meet the hypervisor-protected code integrity (HVCI) policy.",
+  3114: "Dynamic Code Security opted the .NET app or DLL into App Control policy validation. The file under validation didn't pass your policy and was blocked.",
+
+  // -------------------------------------------------------------------------
+  // Supplemental / correlated events (info)
+  // -------------------------------------------------------------------------
+  3089: "This event contains signature information for files that were blocked or audit-blocked by App Control. One 3089 event is created for each signature of a file. Correlated with 3004, 3033, 3034, 3076, and 3077 events.",
+  3099: "Indicates that an App Control policy has been loaded. Includes information about the policy options.",
 
   // -------------------------------------------------------------------------
   // ISG / Managed Installer diagnostic events
   // -------------------------------------------------------------------------
-  3090: "The file was allowed to run based on ISG or Managed Installer authorization.",
-  3091: "The file was not authorized by ISG or Managed Installer. The policy is in audit mode — the file was not blocked.",
-  3092: "The file was not authorized by ISG or Managed Installer. The policy is in enforcement mode — the file was blocked.",
+  3090: "Optional: This event indicates that a file was allowed to run based purely on ISG or Managed Installer.",
+  3091: "This event indicates that a file didn't have ISG or Managed Installer authorization and the App Control policy is in audit mode.",
+  3092: "This event is the enforcement mode equivalent of 3091. The file was blocked.",
 } as const;
 
 export type CiEventId = keyof typeof CI_EVENT_IDS;

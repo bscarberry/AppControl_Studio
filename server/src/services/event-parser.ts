@@ -24,23 +24,31 @@ import { CI_EVENT_IDS } from "@appcontrol/shared";
 // ---------------------------------------------------------------------------
 
 // Enforcement events: the file was actively blocked.
-// Sources: MS Learn "Understanding App Control event IDs", WDACTools module (mattifestation),
-//          CodeIntegrity event manifest (Event ID 3077 = "PolicyFailure" opcode, Error level).
+// Source: Microsoft Learn "Understanding App Control event IDs"
+// https://learn.microsoft.com/en-us/windows/security/application-security/application-control/app-control-for-business/operations/event-id-explanations
 const BLOCK_EVENT_IDS = new Set([
-  3001, 3002, 3003, 3004, 3010, 3023, // kernel-mode signing violations (blocked)
-  3033,  // kernel-mode App Control enforcement block
-  3077,  // user-mode App Control enforcement block  ← NOT audit
-  3092,  // ISG/Managed Installer: file blocked (enforcement)
+  3001, 3002, 3004, 3010, 3023, // kernel-mode signing violations (NOTE: 3003 is not in MS official list)
+  3026, 3032, 3036,             // revocation events
+  3033,                         // kernel-mode App Control enforcement block
+  3065,                         // user-mode DLL enforcement block
+  3077,                         // user-mode App Control enforcement block  ← NOT audit (3076 is audit)
+  3079, 3081,                   // file didn't meet requirements (enforcement)
+  3111,                         // HVCI policy violation
+  3114,                         // Dynamic Code Security (.NET) block
+  3092,                         // ISG/Managed Installer: file blocked (enforcement)
 ]);
 
-// Audit events: the file would have been blocked in enforcement mode but was allowed.
+// Audit events: the file would have been blocked in enforcement mode but was allowed to run.
 const AUDIT_EVENT_IDS = new Set([
-  3034,  // kernel-mode App Control audit (would have been blocked)
-  3076,  // user-mode App Control audit (would have been blocked)
-  3091,  // ISG/Managed Installer: file not authorized (audit mode)
+  3034,       // kernel-mode App Control audit (would have been blocked)
+  3064,       // user-mode DLL audit (would have been blocked)
+  3076,       // user-mode App Control audit (would have been blocked)  ← main audit event
+  3080, 3082, // would have been blocked if enforced
+  3091,       // ISG/Managed Installer: file not authorized (audit mode)
 ]);
 
-// Everything else (3089 signer info, 3090 ISG allow, 3099 policy load) → "info"
+// Everything else falls through to "info":
+//   3026/3036 correlated revocation info, 3089 signer info, 3090 ISG allow, 3099 policy load
 
 function categorizeSeverity(eventId: number): EventSeverity {
   if (BLOCK_EVENT_IDS.has(eventId)) return "block";
