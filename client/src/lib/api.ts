@@ -125,4 +125,20 @@ export const eventsApi = {
 
   parseHunting: (content: string, format: "json" | "csv") =>
     post<EventImportResult>("/events/hunting/parse", { content, format }),
+
+  parseEvtxBinary: async (file: File): Promise<EventImportResult> => {
+    const formData = new FormData();
+    formData.append("file", file);
+    const token = getAccessToken();
+    const res = await fetch(`${BASE}/events/parse-evtx`, {
+      method: "POST",
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: formData,
+    });
+    const json = (await res.json()) as ApiResponse<EventImportResult>;
+    if (!json.ok) {
+      throw new Error((json as { ok: false; error: { message: string } }).error.message);
+    }
+    return json.data;
+  },
 };

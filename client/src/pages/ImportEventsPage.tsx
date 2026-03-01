@@ -3,7 +3,7 @@ import { useMutation } from "@tanstack/react-query";
 import {
   Upload, AlertCircle, CheckCircle, Clock, Shield, ShieldAlert,
   ChevronDown, ChevronRight, AlertTriangle, Hash, FileWarning,
-  Server, Eye, HelpCircle, Activity, Search,
+  Server, Eye, HelpCircle, Activity, Search, File as FileIcon,
 } from "lucide-react";
 import clsx from "clsx";
 import { v4 as uuidv4 } from "uuid";
@@ -25,12 +25,11 @@ type PageTab = "ci-events" | "advanced-hunting" | "build-policy";
 // CI EVENTS TAB
 // ===========================================================================
 
-type ImportFormat = "evtx-json" | "json" | "csv" | "hunting-json" | "hunting-csv";
+type ImportFormat = "evtx-json" | "json" | "evtx";
 
 const FORMAT_OPTIONS = [
-  { id: "evtx-json" as ImportFormat, label: "EVTX JSON Export",      description: "Get-WinEvent ... | ConvertTo-Json", accept: ".json" },
-  { id: "hunting-json" as ImportFormat, label: "Advanced Hunting JSON", description: "MDE Advanced Hunting query export (JSON)", accept: ".json" },
-  { id: "hunting-csv" as ImportFormat, label: "Advanced Hunting CSV",  description: "MDE Advanced Hunting query export (CSV)",  accept: ".csv"  },
+  { id: "evtx-json" as ImportFormat, label: "EVTX JSON Export",   description: "Get-WinEvent ... | ConvertTo-Json", accept: ".json" },
+  { id: "evtx"     as ImportFormat, label: "EVTX Binary File",    description: "Raw .evtx event log — parsed via PowerShell on the server", accept: ".evtx" },
 ];
 
 function CollectionInstructions({ format }: { format: ImportFormat }) {
@@ -40,17 +39,9 @@ function CollectionInstructions({ format }: { format: ImportFormat }) {
       code: `Get-WinEvent -LogName "Microsoft-Windows-CodeIntegrity/Operational" \`\n  | Where-Object { $_.Id -in @(3076,3077,3033,3034,3089,3097,3098) } \`\n  | ConvertTo-Json -Depth 5 \`\n  | Out-File -FilePath ".\\ci-events.json" -Encoding utf8`,
     },
     json: { title: "Collect Events (JSON format)", code: `Get-WinEvent -LogName "Microsoft-Windows-CodeIntegrity/Operational" | ConvertTo-Json` },
-    csv: {
-      title: "Advanced Hunting Query (Kusto)",
-      code: `DeviceEvents\n| where ActionType in ("AppControlCodeIntegrityPolicyAudited", "AppControlCodeIntegrityPolicyBlocked")\n| project Timestamp, DeviceName, ActionType, FileName, FolderPath, SHA256, InitiatingProcessFileName, AdditionalFields\n| export to csv`,
-    },
-    "hunting-json": {
-      title: "Advanced Hunting Query (MDE Portal)",
-      code: `DeviceEvents\n| where ActionType in ("AppControlCodeIntegrityPolicyAudited", "AppControlCodeIntegrityPolicyBlocked",\n    "AppControlCIScriptAudited", "AppControlCIScriptBlocked")\n| extend Fields = parse_json(AdditionalFields)\n| project Timestamp, DeviceName, ActionType, FileName, FolderPath,\n    SHA256, SHA1, InitiatingProcessFileName,\n    PolicyName = tostring(Fields.PolicyName),\n    PolicyGuid = tostring(Fields.PolicyGuid),\n    OriginalFileName = tostring(Fields.OriginalFileName),\n    ProductName = tostring(Fields.ProductName)\n| order by Timestamp desc`,
-    },
-    "hunting-csv": {
-      title: "Export Hunting Results as CSV",
-      code: `// Run the query above in Microsoft Defender portal > Hunting > Advanced Hunting\n// Click Export > Download as CSV`,
+    "evtx": {
+      title: "Locate your EVTX file",
+      code: `# The CodeIntegrity operational log is typically at:\nC:\\Windows\\System32\\winevt\\Logs\\Microsoft-Windows-CodeIntegrity%4Operational.evtx\n\n# Or copy it first (the live log may be locked):\nwevtutil epl "Microsoft-Windows-CodeIntegrity/Operational" .\\ci-events.evtx`,
     },
   };
   const { title, code } = commands[format];
@@ -138,16 +129,59 @@ function EventImportResults({ result }: { result: EventImportResult }) {
   );
 }
 
+function EvtxBinaryDropZone({ onFile }: { onFile: (file: File) => void }) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [loadedFile, setLoadedFile] = useState<string | null>(null);
+
+  const handleFile = (file: File) => { setLoadedFile(file.name); onFile(file); };
+
+  return (
+    <div
+      className={clsx(
+        "relative border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-colors",
+        isDragging ? "border-accent-blue bg-accent-blue-dim/20"
+          : loadedFile ? "border-accent-green bg-accent-green-dim/10"
+          : "border-border hover:border-border-strong bg-surface-2"
+      )}
+      onClick={() => inputRef.current?.click()}
+      onDragEnter={(e) => { e.preventDefault(); setIsDragging(true); }}
+      onDragLeave={() => setIsDragging(false)}
+      onDragOver={(e) => e.preventDefault()}
+      onDrop={(e) => { e.preventDefault(); setIsDragging(false); const f = e.dataTransfer.files[0]; if (f) handleFile(f); }}
+    >
+      <input ref={inputRef} type="file" accept=".evtx" className="hidden"
+        onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); e.currentTarget.value = ""; }}
+        onClick={(e) => (e.currentTarget.value = "")} />
+      {loadedFile ? (
+        <div className="flex flex-col items-center gap-2">
+          <FileIcon size={24} className="text-accent-green" />
+          <p className="text-sm font-medium text-text-primary mono">{loadedFile}</p>
+          <p className="text-xs text-text-muted">Click to replace</p>
+        </div>
+      ) : (
+        <div className="flex flex-col items-center gap-2">
+          <Upload size={24} className="text-text-muted" />
+          <p className="text-sm font-medium text-text-primary">Drop EVTX Binary File</p>
+          <p className="text-xs text-text-muted">Windows Event Log (.evtx) — parsed via PowerShell on the server</p>
+          <p className="text-xs text-text-muted mt-1">Drag & drop or click to browse</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function CiEventsTab() {
   const { setImportedEvents, importedEvents, clearEvents } = useAppStore();
   const [format, setFormat] = useState<ImportFormat>("evtx-json");
   const [result, setResult] = useState<EventImportResult | null>(null);
 
+  type ParseArgs = { kind: "text"; content: string; format: "evtx-json" | "json" } | { kind: "binary"; file: File };
+
   const parseMutation = useMutation({
-    mutationFn: ({ content, format }: { content: string; format: ImportFormat }) => {
-      if (format === "hunting-json") return eventsApi.parseHunting(content, "json");
-      if (format === "hunting-csv")  return eventsApi.parseHunting(content, "csv");
-      return eventsApi.parse(content, format as "evtx-json" | "json" | "csv");
+    mutationFn: (args: ParseArgs) => {
+      if (args.kind === "binary") return eventsApi.parseEvtxBinary(args.file);
+      return eventsApi.parse(args.content, args.format);
     },
     onSuccess: (data) => { setResult(data); setImportedEvents(data.events); },
   });
@@ -165,7 +199,7 @@ function CiEventsTab() {
         )}
         <div className="card p-4 mb-5">
           <h2 className="section-header">Input Format</h2>
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-2 gap-2">
             {FORMAT_OPTIONS.map((opt) => (
               <button key={opt.id} onClick={() => setFormat(opt.id)}
                 className={clsx("text-left p-3 rounded border text-xs transition-colors",
@@ -178,8 +212,13 @@ function CiEventsTab() {
         </div>
         <CollectionInstructions format={format} />
         <div className="mb-5">
-          <FileDropZone accept={selectedFormat.accept} label={`Drop ${selectedFormat.label}`}
-            description={selectedFormat.description} onFile={(content) => parseMutation.mutate({ content, format })} />
+          {format === "evtx" ? (
+            <EvtxBinaryDropZone onFile={(file) => parseMutation.mutate({ kind: "binary", file })} />
+          ) : (
+            <FileDropZone accept={selectedFormat.accept} label={`Drop ${selectedFormat.label}`}
+              description={selectedFormat.description}
+              onFile={(content) => parseMutation.mutate({ kind: "text", content, format: format as "evtx-json" | "json" })} />
+          )}
         </div>
         {parseMutation.isPending && <div className="flex justify-center py-8"><LoadingSpinner label="Parsing events..." /></div>}
         {parseMutation.isError && (
