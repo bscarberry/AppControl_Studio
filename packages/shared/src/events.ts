@@ -12,25 +12,44 @@
 // ---------------------------------------------------------------------------
 
 export const CI_EVENT_IDS = {
-  // Block events
-  3001: "A code integrity check determined that a process attempted to load a kernel driver that did not meet the signing requirements.",
-  3002: "Code Integrity determined that a process attempted to load a kernel driver that did not meet the security requirements.",
-  3003: "Code Integrity determined that a process attempted to load a kernel driver that did not meet the requirements.",
-  3004: "Code Integrity determined that this file does not meet the security requirements.",
-  3010: "Code Integrity determined that a process attempted to load a module that did not meet the requirements.",
-  3023: "Code Integrity determined that a process attempted to load a binary that did not meet the requirements.",
-  3033: "Code Integrity determined that a process attempted to load a binary that did not meet the requirements (enforced).",
-  3034: "Code Integrity determined that a process attempted to load a binary that did not meet the requirements (audit).",
+  // -------------------------------------------------------------------------
+  // Kernel-mode signing / driver integrity violations
+  // -------------------------------------------------------------------------
+  3001: "Code Integrity detected an unsigned driver. The driver was not loaded.",
+  3002: "Code Integrity is unable to verify the image integrity of a file because the set of per-page image hashes could not be found on the system.",
+  3003: "Code Integrity determined that a process attempted to load a kernel module that did not meet the security requirements for Shared Sections.",
+  3004: "Code Integrity is unable to verify the image integrity of a file because the file hash could not be found on the system.",
+  3010: "Code Integrity is unable to load the %2 catalog.",
+  3023: "Code Integrity determined that a process attempted to load a binary that did not pass code signing requirements (revoked or lifetime-signing EKU expired).",
 
-  // Audit events
-  3076: "AUDIT: Code integrity policy would have blocked the file from loading but is in audit mode.",
-  3077: "AUDIT: Code integrity policy would have blocked the file from loading (script) but is in audit mode.",
-  3089: "AUDIT: The file was blocked from loading due to a supplemental policy.",
-  3099: "Code integrity policy was loaded.",
+  // -------------------------------------------------------------------------
+  // Kernel-mode App Control enforcement / audit
+  // -------------------------------------------------------------------------
+  3033: "Code Integrity determined that a process attempted to load a binary that did not meet the signing requirements. The binary was blocked.",
+  3034: "Code Integrity determined that a process attempted to load a binary that did not meet the signing requirements. The binary would have been blocked if the policy were enforced (audit mode).",
 
-  // ISG/Managed Installer
-  3097: "Code integrity determined that a file failed the ISG check.",
-  3098: "AUDIT: Code integrity determined that a file failed the ISG check (audit mode).",
+  // -------------------------------------------------------------------------
+  // User-mode App Control audit (policy in audit mode — file NOT blocked)
+  // -------------------------------------------------------------------------
+  3076: "App Control policy audit: the file would have been blocked if the policy were in enforcement mode.",
+
+  // -------------------------------------------------------------------------
+  // User-mode App Control enforcement (policy enforced — file IS blocked)
+  // -------------------------------------------------------------------------
+  3077: "App Control policy enforcement: the file did not pass the policy and was blocked from loading.",
+
+  // -------------------------------------------------------------------------
+  // Supplemental / correlated events
+  // -------------------------------------------------------------------------
+  3089: "Signature information for a file that triggered a 3076 or 3077 event (one 3089 per signature on the file).",
+  3099: "An App Control policy was loaded or refreshed on the system.",
+
+  // -------------------------------------------------------------------------
+  // ISG / Managed Installer diagnostic events
+  // -------------------------------------------------------------------------
+  3090: "The file was allowed to run based on ISG or Managed Installer authorization.",
+  3091: "The file was not authorized by ISG or Managed Installer. The policy is in audit mode — the file was not blocked.",
+  3092: "The file was not authorized by ISG or Managed Installer. The policy is in enforcement mode — the file was blocked.",
 } as const;
 
 export type CiEventId = keyof typeof CI_EVENT_IDS;

@@ -23,8 +23,24 @@ import { CI_EVENT_IDS } from "@appcontrol/shared";
 // Block vs audit categorization
 // ---------------------------------------------------------------------------
 
-const BLOCK_EVENT_IDS = new Set([3001, 3002, 3003, 3004, 3010, 3023, 3033]);
-const AUDIT_EVENT_IDS = new Set([3034, 3076, 3077, 3089, 3097, 3098]);
+// Enforcement events: the file was actively blocked.
+// Sources: MS Learn "Understanding App Control event IDs", WDACTools module (mattifestation),
+//          CodeIntegrity event manifest (Event ID 3077 = "PolicyFailure" opcode, Error level).
+const BLOCK_EVENT_IDS = new Set([
+  3001, 3002, 3003, 3004, 3010, 3023, // kernel-mode signing violations (blocked)
+  3033,  // kernel-mode App Control enforcement block
+  3077,  // user-mode App Control enforcement block  ← NOT audit
+  3092,  // ISG/Managed Installer: file blocked (enforcement)
+]);
+
+// Audit events: the file would have been blocked in enforcement mode but was allowed.
+const AUDIT_EVENT_IDS = new Set([
+  3034,  // kernel-mode App Control audit (would have been blocked)
+  3076,  // user-mode App Control audit (would have been blocked)
+  3091,  // ISG/Managed Installer: file not authorized (audit mode)
+]);
+
+// Everything else (3089 signer info, 3090 ISG allow, 3099 policy load) → "info"
 
 function categorizeSeverity(eventId: number): EventSeverity {
   if (BLOCK_EVENT_IDS.has(eventId)) return "block";
