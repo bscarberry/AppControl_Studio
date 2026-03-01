@@ -10,6 +10,7 @@ import {
   ShieldCheck,
   Search,
   Lock,
+  PlayCircle,
   ChevronRight,
 } from "lucide-react";
 import clsx from "clsx";
@@ -70,6 +71,12 @@ const navItems: NavItem[] = [
     label: "Export",
     icon: <Download size={16} />,
     description: "Download deployable XML",
+  },
+  {
+    to: "/simulator",
+    label: "Simulator",
+    icon: <PlayCircle size={16} />,
+    description: "Test allow/block decisions",
   },
   {
     to: "/security",

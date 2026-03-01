@@ -15,6 +15,8 @@ import type {
   HuntingIngestApiResponse,
   SecurityStatus,
   SecurityAuditResponse,
+  SimulateBinaryResponse,
+  BinaryMetadata,
   WdacPolicy,
   ParsedCiEvent,
 } from "@appcontrol/shared";
@@ -93,6 +95,9 @@ export const policyApi = {
     includePathRules?: boolean;
     effect?: "Allow" | "Deny";
   }) => post<HuntingIngestApiResponse>("/policy/ingest-advanced-hunting", params),
+
+  simulate: (binary: BinaryMetadata, policy: WdacPolicy) =>
+    post<SimulateBinaryResponse>("/policy/simulate", { binary, policy }),
 };
 
 // ---------------------------------------------------------------------------

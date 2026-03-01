@@ -104,6 +104,18 @@ export type {
   HuntingImportResult,
 } from "./hunting-ingest";
 
+// Type re-exports from simulation
+export type {
+  BinaryMetadata,
+  EvalPhase,
+  StepOutcome,
+  SimRuleType,
+  SimVerdict,
+  MatchedBy,
+  EvalStep,
+  EvaluationResult,
+} from "./simulation";
+
 // Type re-exports from api
 export type {
   ApiSuccess,
@@ -130,4 +142,6 @@ export type {
   HuntingIngestApiRequest,
   HuntingIngestApiResponse,
   SecurityAuditResponse,
+  SimulateBinaryRequest,
+  SimulateBinaryResponse,
 } from "./api";

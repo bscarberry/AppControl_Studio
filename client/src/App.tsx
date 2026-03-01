@@ -9,6 +9,7 @@ import { RuleEnginePage } from "./pages/RuleEnginePage.tsx";
 import { SemanticComparePage } from "./pages/SemanticComparePage.tsx";
 import { AdvancedHuntingPage } from "./pages/AdvancedHuntingPage.tsx";
 import { SecurityPage } from "./pages/SecurityPage.tsx";
+import { SimulatorPage } from "./pages/SimulatorPage.tsx";
 
 export default function App() {
   return (
@@ -26,6 +27,7 @@ export default function App() {
             <Route path="/export" element={<ExportPage />} />
             <Route path="/rule-engine" element={<RuleEnginePage />} />
             <Route path="/security" element={<SecurityPage />} />
+            <Route path="/simulator" element={<SimulatorPage />} />
           </Routes>
         </main>
       </div>

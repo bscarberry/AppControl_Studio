@@ -6,6 +6,7 @@ import { comparePolicies } from "../services/policy-comparator.js";
 import { explainPolicy } from "../services/policy-explainer.js";
 import { buildPolicyFromEvents } from "../services/policy-builder.js";
 import { proposeRules } from "../services/rule-engine.js";
+import { simulateBinary } from "../services/policy-simulator.js";
 import { semanticComparePolicies } from "../services/semantic-comparator.js";
 import { ingestAdvancedHunting } from "../services/advanced-hunting-ingestor.js";
 import { validateXmlInput } from "../middleware/xml-validator.js";
@@ -370,4 +371,56 @@ policyRouter.get("/options", (_req: Request, res: Response) => {
     critical: "critical" in def ? Boolean(def.critical) : false,
   }));
   res.json({ ok: true, data: { options } });
+});
+
+// ---------------------------------------------------------------------------
+// Binary simulation — evaluate allow/block against a policy
+// ---------------------------------------------------------------------------
+
+policyRouter.post("/simulate", (req: Request, res: Response) => {
+  const binarySchema = z.object({
+    sha256: z.string().regex(/^[0-9a-fA-F]{64}$/).optional(),
+    sha1: z.string().regex(/^[0-9a-fA-F]{40}$/).optional(),
+    signerName: z.string().max(512).optional(),
+    rootCertTbs: z.string().max(512).optional(),
+    issuerName: z.string().max(512).optional(),
+    originalFileName: z.string().max(512).optional(),
+    internalName: z.string().max(512).optional(),
+    productName: z.string().max(512).optional(),
+    fileVersion: z.string().max(64).optional(),
+    filePath: z.string().max(4096).optional(),
+    isKernelMode: z.boolean().optional(),
+  });
+  const schema = z.object({
+    binary: binarySchema,
+    policy: z.record(z.unknown()),
+  });
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ ok: false, error: { code: "VALIDATION", message: parsed.error.message } });
+    return;
+  }
+
+  const start = Date.now();
+  const logger = getAuditLogger();
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const result = simulateBinary(parsed.data.binary, parsed.data.policy as any);
+    logger.log("POLICY_LOADED", {
+      role: req.userRole,
+      outputSummary: `simulate verdict=${result.verdict} matchedBy=${result.matchedBy ?? "none"} steps=${result.steps.length}`,
+      durationMs: Date.now() - start,
+      succeeded: true,
+    });
+    res.json({ ok: true, data: { result } });
+  } catch (err) {
+    logger.log("POLICY_LOADED", {
+      role: req.userRole,
+      durationMs: Date.now() - start,
+      succeeded: false,
+      errorCode: "SIMULATE_ERROR",
+      errorMessage: (err as Error).message,
+    });
+    res.status(422).json({ ok: false, error: { code: "SIMULATE_ERROR", message: (err as Error).message } });
+  }
 });

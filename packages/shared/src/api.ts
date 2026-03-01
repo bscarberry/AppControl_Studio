@@ -181,6 +181,9 @@ export interface HuntingIngestApiResponse {
   warnings: import("./hunting-ingest").HuntingImportWarning[];
 }
 
+/** POST /api/policy/simulate — evaluate whether a binary would be allowed or blocked */
+export type { SimulateBinaryRequest, SimulateBinaryResponse } from "./simulation";
+
 /** POST /api/policy/explain — returns human-readable explanation of a policy */
 export interface ExplainPolicyRequest {
   policy: WdacPolicy;
