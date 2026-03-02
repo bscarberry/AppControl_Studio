@@ -2,7 +2,7 @@
  * AppControl Studio — Express Server
  *
  * Security architecture summary:
- *   • Bound exclusively to 127.0.0.1 — no inbound network exposure
+ *   • Binds to 0.0.0.0 in production (Azure App Service) / 127.0.0.1 in dev
  *   • No outbound HTTP calls during policy processing
  *   • Append-only structured audit log (metadata only — no policy content)
  *   • Optional RBAC with timing-safe SHA-256 token authentication
@@ -16,6 +16,7 @@
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
+import { join } from "path";
 import { policyRouter } from "./routes/policy.js";
 import { eventsRouter } from "./routes/events.js";
 import { securityRouter } from "./routes/security.js";
@@ -126,22 +127,36 @@ const app = express();
   });
 
   // ---------------------------------------------------------------------------
+  // Client static files + SPA fallback (must follow /api/* routes)
+  // ---------------------------------------------------------------------------
+
+  // __dirname is server/dist at runtime; client/dist sits two levels up
+  const clientDist = join(__dirname, "..", "..", "client", "dist");
+  app.use(express.static(clientDist));
+
+  // Return index.html for any non-API route so React Router can handle it
+  app.get("*", (_req, res) => {
+    res.sendFile(join(clientDist, "index.html"));
+  });
+
+  // ---------------------------------------------------------------------------
   // Error handling
   // ---------------------------------------------------------------------------
 
   app.use(errorHandler);
 
   // ---------------------------------------------------------------------------
-  // Start server — loopback only
+  // Start server — binds to all interfaces in production (Azure requires 0.0.0.0)
   // ---------------------------------------------------------------------------
 
-  app.listen(PORT, "127.0.0.1", () => {
+  const HOST = process.env.NODE_ENV === "production" ? "0.0.0.0" : "127.0.0.1";
+  app.listen(PORT, HOST, () => {
     const logger = getAuditLogger();
     logger.log("SERVER_START", {
       outputSummary: `port=${PORT} rbac=${secConfig.rbac.enabled} audit=${secConfig.audit.enabled}`,
       succeeded: true,
     });
-    console.log(`[AppControl Studio] Listening on http://127.0.0.1:${PORT}`);
+    console.log(`[AppControl Studio] Listening on http://${HOST}:${PORT}`);
     console.log(`[AppControl Studio] RBAC: ${secConfig.rbac.enabled ? "enabled" : "disabled (local mode)"}`);
     console.log(`[AppControl Studio] Audit log: ${secConfig.audit.enabled ? secConfig.audit.logDir : "in-memory only"}`);
     console.log(`[AppControl Studio] All processing is local — no external data transmission.`);
