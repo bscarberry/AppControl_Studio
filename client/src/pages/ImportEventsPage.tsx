@@ -30,7 +30,7 @@ type ImportFormat = "evtx-json" | "json" | "evtx";
 
 const FORMAT_OPTIONS = [
   { id: "evtx-json" as ImportFormat, label: "EVTX JSON Export",   description: "Get-WinEvent ... | ConvertTo-Json", accept: ".json" },
-  { id: "evtx"     as ImportFormat, label: "EVTX Binary File",    description: "Raw .evtx event log — parsed via PowerShell on the server", accept: ".evtx" },
+  { id: "evtx"     as ImportFormat, label: "EVTX Binary File",    description: "Raw .evtx event log — parsed natively on the server", accept: ".evtx" },
 ];
 
 function CollectionInstructions({ format }: { format: ImportFormat }) {
@@ -222,7 +222,7 @@ function EvtxBinaryDropZone({ onFile }: { onFile: (file: File) => void }) {
         <div className="flex flex-col items-center gap-2">
           <Upload size={24} className="text-text-muted" />
           <p className="text-sm font-medium text-text-primary">Drop EVTX Binary File</p>
-          <p className="text-xs text-text-muted">Windows Event Log (.evtx) — parsed via PowerShell on the server</p>
+          <p className="text-xs text-text-muted">Windows Event Log (.evtx) — parsed natively on the server</p>
           <p className="text-xs text-text-muted mt-1">Drag & drop or click to browse</p>
         </div>
       )}
