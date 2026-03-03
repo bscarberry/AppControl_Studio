@@ -24,6 +24,10 @@ jobs:
           node-version: '22.x'
 
       - name: npm install, build, and test
+        env:
+          VITE_MSAL_CLIENT_ID: ${{ secrets.VITE_MSAL_CLIENT_ID }}
+          VITE_MSAL_TENANT_ID: ${{ secrets.VITE_MSAL_TENANT_ID }}
+          VITE_MSAL_REDIRECT_URI: ${{ secrets.VITE_MSAL_REDIRECT_URI }}
         run: |
           npm install
           npm run build --if-present
