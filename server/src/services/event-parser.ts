@@ -465,8 +465,13 @@ function parseNamedRecord(
     const severity = categorizeSeverity(eventId);
     const description = CI_EVENT_IDS[eventId as keyof typeof CI_EVENT_IDS] ?? `Event ID ${eventId}`;
 
+    // Field names vary by event ID and Windows version.  Named-field EVTX
+    // events (renderXml path) use space-separated names for 3077/3076, e.g.
+    // "File Name", "SHA256 Flat Hash".  PowerShell ToXml() exports use camel/
+    // Pascal-case names like "FileNameBuffer", "SHA256FlatHash".
     const filePath =
       get("FileNameBuffer") ??
+      get("File Name") ??       // 3077 native EVTX field name
       get("FilePath") ??
       get("ImageName") ??
       "(unknown)";
@@ -476,14 +481,25 @@ function parseNamedRecord(
       timestamp: normalizeTimestamp(record.TimeCreated),
       machineName: record.MachineName ?? undefined,
       correlationId,
-      requestingProcess: get("ProcessNameBuffer") ?? get("ProcessName"),
+      requestingProcess:
+        get("ProcessNameBuffer") ??
+        get("Process Name") ??  // 3077 native EVTX field name
+        get("ProcessName"),
       filePath,
       fileName: filePath ? filePath.split(/[/\\]/).pop() : undefined,
-      // Hashes from 3076/3077 Fields
-      sha256FlatHash: getHex("Sha256FlatHash") ?? getHex("SHA256FlatHash"),
-      sha1FlatHash: getHex("Sha1FlatHash") ?? getHex("SHA1FlatHash"),
-      sha256PageHash: getHex("Sha256PageHash") ?? getHex("SHA256PageHash"),
-      sha1PageHash: getHex("Sha1PageHash") ?? getHex("SHA1PageHash"),
+      // Hashes — try camelCase (PowerShell/ToXml) then spaced (native EVTX renderXml)
+      sha256FlatHash:
+        getHex("Sha256FlatHash") ?? getHex("SHA256FlatHash") ??
+        getHex("SHA256 Flat Hash") ?? getHex("SHA256 Hash"),
+      sha1FlatHash:
+        getHex("Sha1FlatHash") ?? getHex("SHA1FlatHash") ??
+        getHex("SHA1 Flat Hash") ?? getHex("SHA1 Hash"),
+      sha256PageHash:
+        getHex("Sha256PageHash") ?? getHex("SHA256PageHash") ??
+        getHex("SHA256 Page Hash"),
+      sha1PageHash:
+        getHex("Sha1PageHash") ?? getHex("SHA1PageHash") ??
+        getHex("SHA1 Page Hash"),
       // File version resource fields (may come from 3076/3077 or 3089)
       originalFileName: get("OriginalFilename") ?? get("OriginalFileName"),
       internalName: get("InternalName"),

@@ -38,6 +38,36 @@ interface NamedRecord {
   Fields: Record<string, string>;
 }
 
+/**
+ * @ts-evtx/core has a bug where WString substitution fields in CodeIntegrity
+ * events (e.g. PublisherName, IssuerName in event 3089) are decoded as if the
+ * UTF-16LE bytes are big-endian, producing codepoints like U+4E00 (一) when
+ * the actual character is U+004E ('N').  Each code unit's two bytes are simply
+ * swapped.
+ *
+ * Detection: if ≥70% of characters have their low byte = 0x00, the string is
+ * almost certainly a garbled ASCII/Latin string (real ASCII in UTF-16LE has
+ * the null byte as the HIGH byte; decoded as BE it ends up as the LOW byte).
+ * We swap the bytes of every code unit and strip any leading garbage bytes
+ * that fall outside printable ASCII (artefacts of BXML length-prefix bytes
+ * that the parser sometimes includes at the start of the decoded string).
+ */
+function fixGarbledUtf16(str: string): string {
+  if (!str || str.length < 2) return str;
+  const chars = Array.from(str);
+  const garbledCount = chars.filter(c => (c.codePointAt(0)! & 0xff) === 0).length;
+  if (garbledCount < chars.length * 0.7) return str; // looks like a real string
+  const fixed = chars
+    .map(c => {
+      const cp = c.codePointAt(0)!;
+      const swapped = ((cp & 0xff) << 8) | ((cp >> 8) & 0xff);
+      return String.fromCodePoint(swapped || cp);
+    })
+    .join("")
+    .replace(/^[^\x20-\x7e\u00a0-\u00ff]+/, ""); // strip leading BXML artefacts
+  return fixed || str;
+}
+
 // fast-xml-parser configured to match the EVTX XML schema:
 //  - ignoreAttributes: false  — keep SystemTime, ActivityID, Name attrs
 //  - attributeNamePrefix: ""  — e.g. Data.Name instead of Data.@_Name
@@ -100,8 +130,11 @@ function xmlToNamedRecord(xmlStr: string): NamedRecord | null {
         const item = d as Record<string, unknown>;
         const name = item["Name"];
         if (name != null) {
-          const val = item["#text"];
-          fields[String(name)] = val != null ? String(val) : "";
+          const raw = item["#text"];
+          const str = raw != null ? String(raw) : "";
+          // fixGarbledUtf16 corrects byte-swapped WString values produced by
+          // the @ts-evtx/core renderXml() bug (affects CI 3089 string fields)
+          fields[String(name)] = fixGarbledUtf16(str);
         }
       }
     }
