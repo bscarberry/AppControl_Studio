@@ -319,6 +319,7 @@ export function buildPolicyFromEvents(
 
   const policy: WdacPolicy = {
     policyId,
+    platformId: "2E07F7E4-194C-4D20-B7C9-6F44A6C5A234",
     versionEx: "10.0.0.0",
     friendlyName: req.policyName,
     policyType: "Base",
@@ -328,7 +329,8 @@ export function buildPolicyFromEvents(
     signers,
     signingScenarios,
     updatePolicySigners: [],
-    ciSigners: [],
+    ciSigners: allowedSignerIds,
+    hvciOptions: 0,
   };
 
   return { policy, buildLog: log };

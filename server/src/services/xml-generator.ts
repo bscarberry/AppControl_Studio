@@ -49,86 +49,106 @@ export function generateWdacXml(policy: WdacPolicy): string {
   const lines: string[] = [];
 
   lines.push('<?xml version="1.0" encoding="utf-8"?>');
-  lines.push("<SiPolicy");
-  lines.push(`  xmlns="urn:schemas-microsoft-com:sipolicy"`);
-  lines.push(`  PolicyID="{${escapeXml(policy.policyId)}}"`);
 
-  if (policy.basePolicyId) {
-    lines.push(`  BasePolicyID="{${escapeXml(policy.basePolicyId)}}"`);
-  }
-  if (policy.policyTypeId) {
-    lines.push(`  PolicyTypeID="{${escapeXml(policy.policyTypeId)}}"`);
-  }
-  if (policy.friendlyName) {
-    lines.push(`  FriendlyName="${escapeXml(policy.friendlyName)}"`);
-  }
-  lines.push(`  VersionEx="${escapeXml(policy.versionEx)}"`);
+  // Root element — namespaces + PolicyType on a single line (matches cipolicy schema)
+  const policyTypeAttr =
+    policy.policyType === "Supplemental" ? "Supplemental Policy" : "Base Policy";
+  lines.push(
+    `<SiPolicy` +
+    ` xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"` +
+    ` xmlns:xsd="http://www.w3.org/2001/XMLSchema"` +
+    ` PolicyType="${policyTypeAttr}"` +
+    ` xmlns="urn:schemas-microsoft-com:sipolicy">`
+  );
+
+  // VersionEx, PlatformID, PolicyID, BasePolicyID — child elements (not attributes)
+  lines.push(`${indent(1)}<VersionEx>${escapeXml(policy.versionEx)}</VersionEx>`);
   if (policy.platformId) {
-    lines.push(`  PlatformID="{${escapeXml(policy.platformId)}}"`);
+    lines.push(`${indent(1)}<PlatformID>{${escapeXml(policy.platformId)}}</PlatformID>`);
   }
-  if (policy.hvciOptions !== undefined) {
-    lines.push(`  HvciOptions="${policy.hvciOptions}"`);
+  lines.push(`${indent(1)}<PolicyID>{${escapeXml(policy.policyId)}}</PolicyID>`);
+  if (policy.basePolicyId) {
+    lines.push(`${indent(1)}<BasePolicyID>{${escapeXml(policy.basePolicyId)}}</BasePolicyID>`);
   }
-  lines.push(">");
-  lines.push("");
 
-  // Rules (Policy options)
+  // Rules
   lines.push(`${indent(1)}<Rules>`);
   lines.push(...generateRuleOptions(policy.options));
   lines.push(`${indent(1)}</Rules>`);
-  lines.push("");
 
-  // EKUs
+  // EKUs — always emitted; self-closing when empty
   if (policy.ekus.length > 0) {
     lines.push(`${indent(1)}<EKUs>`);
     lines.push(...generateEkus(policy.ekus));
     lines.push(`${indent(1)}</EKUs>`);
-    lines.push("");
+  } else {
+    lines.push(`${indent(1)}<EKUs />`);
   }
 
-  // FileRules — required element per cipolicy.xsd; always emitted, may be empty
-  lines.push(`${indent(1)}<FileRules>`);
+  // FileRules — always emitted; self-closing when empty
   if (policy.fileRules.length > 0) {
+    lines.push(`${indent(1)}<FileRules>`);
     lines.push(...generateFileRules(policy.fileRules));
+    lines.push(`${indent(1)}</FileRules>`);
+  } else {
+    lines.push(`${indent(1)}<FileRules />`);
   }
-  lines.push(`${indent(1)}</FileRules>`);
-  lines.push("");
 
-  // Signers — required element per cipolicy.xsd; always emitted, may be empty
-  lines.push(`${indent(1)}<Signers>`);
+  // Signers — always emitted; self-closing when empty
   if (policy.signers.length > 0) {
+    lines.push(`${indent(1)}<Signers>`);
     lines.push(...generateSigners(policy.signers));
+    lines.push(`${indent(1)}</Signers>`);
+  } else {
+    lines.push(`${indent(1)}<Signers />`);
   }
-  lines.push(`${indent(1)}</Signers>`);
-  lines.push("");
 
   // Signing Scenarios
+  const scenarioFriendlyName = policy.friendlyName ?? "Auto generated policy";
   lines.push(`${indent(1)}<SigningScenarios>`);
-  lines.push(...generateSigningScenarios(policy.signingScenarios));
+  lines.push(...generateSigningScenarios(policy.signingScenarios, scenarioFriendlyName));
   lines.push(`${indent(1)}</SigningScenarios>`);
-  lines.push("");
 
-  // UpdatePolicySigners
+  // UpdatePolicySigners — always emitted; self-closing when empty
   if (policy.updatePolicySigners.length > 0) {
     lines.push(`${indent(1)}<UpdatePolicySigners>`);
     for (const signerId of policy.updatePolicySigners) {
       lines.push(`${indent(2)}<UpdatePolicySigner SignerId="${escapeXml(signerId)}" />`);
     }
     lines.push(`${indent(1)}</UpdatePolicySigners>`);
-    lines.push("");
+  } else {
+    lines.push(`${indent(1)}<UpdatePolicySigners />`);
   }
 
-  // CiSigners
+  // CiSigners — always emitted; self-closing when empty
   if (policy.ciSigners.length > 0) {
     lines.push(`${indent(1)}<CiSigners>`);
     for (const signerId of policy.ciSigners) {
       lines.push(`${indent(2)}<CiSigner SignerId="${escapeXml(signerId)}" />`);
     }
     lines.push(`${indent(1)}</CiSigners>`);
-    lines.push("");
+  } else {
+    lines.push(`${indent(1)}<CiSigners />`);
   }
 
-  lines.push("</SiPolicy>");
+  // HvciOptions — child element (not an attribute on SiPolicy)
+  lines.push(`${indent(1)}<HvciOptions>${policy.hvciOptions ?? 0}</HvciOptions>`);
+
+  // Settings — PolicyInfo Name and Id
+  const policyLabel = escapeXml(policy.friendlyName ?? policy.policyId);
+  lines.push(`${indent(1)}<Settings>`);
+  for (const valueName of ["Name", "Id"] as const) {
+    lines.push(
+      `${indent(2)}<Setting Provider="PolicyInfo" Key="Information" ValueName="${valueName}">`
+    );
+    lines.push(`${indent(3)}<Value>`);
+    lines.push(`${indent(4)}<String>${policyLabel}</String>`);
+    lines.push(`${indent(3)}</Value>`);
+    lines.push(`${indent(2)}</Setting>`);
+  }
+  lines.push(`${indent(1)}</Settings>`);
+
+  lines.push(`</SiPolicy>`);
 
   return lines.join("\n");
 }
@@ -232,7 +252,10 @@ function serializeFileRule(rule: WdacFileRule): string {
 function generateSigners(signers: WdacSignerRule[]): string[] {
   const lines: string[] = [];
   for (const signer of signers) {
-    lines.push(`${indent(2)}<Signer ID="${escapeXml(signer.id)}" Name="${escapeXml(signer.name)}">`);
+    // Name before ID (cipolicy schema order)
+    lines.push(
+      `${indent(2)}<Signer Name="${escapeXml(signer.name)}" ID="${escapeXml(signer.id)}">`
+    );
 
     if (signer.certRoot) {
       lines.push(
@@ -269,61 +292,90 @@ function generateSigners(signers: WdacSignerRule[]): string[] {
   return lines;
 }
 
-function generateSigningScenarios(scenarios: WdacSigningScenario[]): string[] {
+function generateSigningScenarios(
+  scenarios: WdacSigningScenario[],
+  friendlyName: string
+): string[] {
   const lines: string[] = [];
   for (const ss of scenarios) {
     const hashAttr = ss.minHashVersion
       ? ` MinimumHashAlgorithm="${escapeXml(ss.minHashVersion)}"`
       : "";
+    // ID, FriendlyName, Value (cipolicy schema order)
     lines.push(
-      `${indent(2)}<SigningScenario Value="${ss.value}" ID="${escapeXml(ss.id)}"${hashAttr}>`
+      `${indent(2)}<SigningScenario` +
+      ` ID="${escapeXml(ss.id)}"` +
+      ` FriendlyName="${escapeXml(friendlyName)}"` +
+      ` Value="${ss.value}"` +
+      `${hashAttr}>`
     );
-    lines.push(`${indent(3)}<ProductSigners>`);
 
-    // AllowedSigners
-    if (ss.allowedSigners.length > 0) {
-      lines.push(`${indent(4)}<AllowedSigners>`);
-      for (const as_ of ss.allowedSigners) {
-        if (as_.exceptDenyRuleIds && as_.exceptDenyRuleIds.length > 0) {
-          lines.push(`${indent(5)}<AllowedSigner SignerId="${escapeXml(as_.signerId)}">`);
-          for (const denyId of as_.exceptDenyRuleIds) {
-            lines.push(`${indent(6)}<ExceptDenyRule DenyRuleID="${escapeXml(denyId)}" />`);
+    const hasContent =
+      ss.allowedSigners.length > 0 ||
+      ss.deniedSigners.length > 0 ||
+      ss.fileRuleRefs.length > 0;
+
+    if (hasContent) {
+      lines.push(`${indent(3)}<ProductSigners>`);
+
+      if (ss.allowedSigners.length > 0) {
+        lines.push(`${indent(4)}<AllowedSigners>`);
+        for (const as_ of ss.allowedSigners) {
+          if (as_.exceptDenyRuleIds && as_.exceptDenyRuleIds.length > 0) {
+            lines.push(
+              `${indent(5)}<AllowedSigner SignerId="${escapeXml(as_.signerId)}">`
+            );
+            for (const denyId of as_.exceptDenyRuleIds) {
+              lines.push(
+                `${indent(6)}<ExceptDenyRule DenyRuleID="${escapeXml(denyId)}" />`
+              );
+            }
+            lines.push(`${indent(5)}</AllowedSigner>`);
+          } else {
+            lines.push(
+              `${indent(5)}<AllowedSigner SignerId="${escapeXml(as_.signerId)}" />`
+            );
           }
-          lines.push(`${indent(5)}</AllowedSigner>`);
-        } else {
-          lines.push(`${indent(5)}<AllowedSigner SignerId="${escapeXml(as_.signerId)}" />`);
         }
+        lines.push(`${indent(4)}</AllowedSigners>`);
       }
-      lines.push(`${indent(4)}</AllowedSigners>`);
-    }
 
-    // DeniedSigners
-    if (ss.deniedSigners.length > 0) {
-      lines.push(`${indent(4)}<DeniedSigners>`);
-      for (const ds of ss.deniedSigners) {
-        if (ds.exceptAllowRuleIds && ds.exceptAllowRuleIds.length > 0) {
-          lines.push(`${indent(5)}<DeniedSigner SignerId="${escapeXml(ds.signerId)}">`);
-          for (const allowId of ds.exceptAllowRuleIds) {
-            lines.push(`${indent(6)}<ExceptAllowRule AllowRuleID="${escapeXml(allowId)}" />`);
+      if (ss.deniedSigners.length > 0) {
+        lines.push(`${indent(4)}<DeniedSigners>`);
+        for (const ds of ss.deniedSigners) {
+          if (ds.exceptAllowRuleIds && ds.exceptAllowRuleIds.length > 0) {
+            lines.push(
+              `${indent(5)}<DeniedSigner SignerId="${escapeXml(ds.signerId)}">`
+            );
+            for (const allowId of ds.exceptAllowRuleIds) {
+              lines.push(
+                `${indent(6)}<ExceptAllowRule AllowRuleID="${escapeXml(allowId)}" />`
+              );
+            }
+            lines.push(`${indent(5)}</DeniedSigner>`);
+          } else {
+            lines.push(
+              `${indent(5)}<DeniedSigner SignerId="${escapeXml(ds.signerId)}" />`
+            );
           }
-          lines.push(`${indent(5)}</DeniedSigner>`);
-        } else {
-          lines.push(`${indent(5)}<DeniedSigner SignerId="${escapeXml(ds.signerId)}" />`);
         }
+        lines.push(`${indent(4)}</DeniedSigners>`);
       }
-      lines.push(`${indent(4)}</DeniedSigners>`);
+
+      if (ss.fileRuleRefs.length > 0) {
+        lines.push(`${indent(4)}<FileRulesRef>`);
+        for (const ruleId of ss.fileRuleRefs) {
+          lines.push(`${indent(5)}<FileRuleRef RuleID="${escapeXml(ruleId)}" />`);
+        }
+        lines.push(`${indent(4)}</FileRulesRef>`);
+      }
+
+      lines.push(`${indent(3)}</ProductSigners>`);
+    } else {
+      // Self-closing when no content
+      lines.push(`${indent(3)}<ProductSigners />`);
     }
 
-    // FileRulesRef
-    if (ss.fileRuleRefs.length > 0) {
-      lines.push(`${indent(4)}<FileRulesRef>`);
-      for (const ruleId of ss.fileRuleRefs) {
-        lines.push(`${indent(5)}<FileRuleRef RuleID="${escapeXml(ruleId)}" />`);
-      }
-      lines.push(`${indent(4)}</FileRulesRef>`);
-    }
-
-    lines.push(`${indent(3)}</ProductSigners>`);
     lines.push(`${indent(2)}</SigningScenario>`);
   }
   return lines;
