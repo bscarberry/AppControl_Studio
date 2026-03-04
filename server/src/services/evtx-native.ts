@@ -12,7 +12,6 @@
 import path from "path";
 import os from "os";
 import { promises as fs } from "fs";
-import { evtx } from "@ts-evtx/core";
 
 // CodeIntegrity event IDs we care about
 const CI_IDS = new Set([
@@ -32,6 +31,27 @@ interface NamedRecord {
   Fields: Record<string, string>;
 }
 
+// Minimal surface of the @ts-evtx/core API we actually call.
+// Typed locally so we can load the module via new Function() below.
+interface EvtxDataItem { name?: string | null; value?: unknown }
+interface EvtxEvent {
+  eventId: number;
+  timestamp?: string | null;
+  computer?: string | null;
+  level?: number | null;
+  core?: { correlation?: Record<string, unknown> | null } | null;
+  data: { items: EvtxDataItem[] };
+}
+type EvtxFn = (filePath: string) => { forEach: (fn: (e: EvtxEvent) => void) => Promise<void> };
+
+// new Function() prevents TypeScript from compiling this import() call into
+// require(). The server bundles to CommonJS, and @ts-evtx/core is ESM-only —
+// require() on an ESM package throws ERR_REQUIRE_ESM at runtime. Wrapping in
+// new Function() keeps the raw import() expression intact in the emitted JS so
+// Node.js handles it natively via its ESM loader.
+const loadEsm = new Function("m", "return import(m)") as
+  (m: string) => Promise<{ evtx: EvtxFn }>;
+
 /**
  * Parse an EVTX binary buffer and return a JSON string in the named-field
  * format consumed by parseEvtxJson().
@@ -45,6 +65,8 @@ export async function evtxBufferToNamedFieldJson(buffer: Buffer): Promise<string
 
   try {
     await fs.writeFile(tmpEvtx, buffer);
+
+    const { evtx } = await loadEsm("@ts-evtx/core");
 
     const records: NamedRecord[] = [];
 
