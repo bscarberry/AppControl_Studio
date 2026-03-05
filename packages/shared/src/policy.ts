@@ -23,19 +23,19 @@ export const POLICY_RULE_OPTIONS = {
   7: { name: "Allowed:Debug Policy Augmented", description: "Allows kernel debugger to augment policies (not recommended for production)." },
   8: { name: "Required:EV Signers", description: "Requires Extended Validation (EV) certificates for drivers." },
   9: { name: "Enabled:Advanced Boot Options Menu", description: "Allows users to access the Advanced Boot Options menu, which may allow disabling App Control." },
-  10: { name: "Enabled:Boot Audit on Failure", description: "Causes the system to boot into audit mode if the policy fails to apply." },
+  10: { name: "Enabled:Boot Audit On Failure", description: "Causes the system to boot into audit mode if the policy fails to apply." },
   11: { name: "Disabled:Script Enforcement", description: "Disables script enforcement for PowerShell, WSH, and similar interpreters." },
   12: { name: "Required:Enforce Store Applications", description: "Enforces code integrity for Windows Store (UWP) applications." },
   13: { name: "Enabled:Managed Installer", description: "Enables the managed installer trust mechanism." },
   14: { name: "Enabled:Intelligent Security Graph Authorization", description: "Enables Microsoft ISG (cloud-based reputation) as a trust source." },
-  15: { name: "Invalidated:EA Not Required", description: "Marks the policy as not requiring extended attributes." },
+  15: { name: "Enabled:Invalidate EAs on Reboot", description: "Clears the Managed Installer and ISG extended attribute (EA) cache on reboot, requiring all files to be re-evaluated on the next boot." },
   16: { name: "Enabled:Update Policy No Reboot", description: "Allows policy updates without requiring a reboot." },
   17: { name: "Enabled:Allow Supplemental Policies", description: "Allows this base policy to be extended by supplemental policies." },
   18: { name: "Disabled:Runtime FilePath Rule Protection", description: "Disables path-rule enforcement validation at runtime (security risk)." },
   19: { name: "Enabled:Dynamic Code Security", description: "Enforces App Control for dynamically generated code." },
   20: { name: "Enabled:Revoked Expired As Unsigned", description: "Treats revoked or expired certificates as unsigned." },
-  21: { name: "Enabled:Developer Unlockable MSA Apps", description: "Allows MSA-authenticated apps to be unlocked for development." },
-  22: { name: "Enabled:Strict WHQL Attestation", description: "Requires strict WHQL attestation for kernel drivers." },
+  21: { name: "Enabled:Developer Mode Dynamic Code Trust", description: "Trusts UWP apps debugged or sideloaded via Visual Studio or Device Portal when Developer Mode is enabled on the device." },
+  22: { name: "Enabled:Secure Setting Policy", description: "Enables enforcement of secure policy settings tied to Secure Boot — restricts policy modification to signed updates only." },
 } as const;
 
 export type PolicyRuleOptionNumber = keyof typeof POLICY_RULE_OPTIONS;

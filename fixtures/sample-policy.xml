@@ -3,15 +3,22 @@
   Sample WDAC Policy — AppControl Studio
   This is a minimal, well-formed SiPolicy XML file for testing.
   It does NOT represent a secure production policy.
+
+  Format notes:
+  - PolicyID, VersionEx, PlatformID, HvciOptions, etc. are child *elements*, not attributes.
+    This matches the output of ConvertFrom-CIPolicy / Set-CIPolicyIdInfo and the cipolicy.xsd schema.
+  - The FriendlyName and Id values are stored in the <Settings> block per the schema.
+  - A Base policy does NOT carry a <BasePolicyID> element (or it equals the PolicyID).
 -->
 <SiPolicy
-  xmlns="urn:schemas-microsoft-com:sipolicy"
-  PolicyID="{A244370E-44C9-4C06-B551-F6016E563076}"
-  BasePolicyID="{A244370E-44C9-4C06-B551-F6016E563076}"
-  FriendlyName="AppControl Studio Sample Policy"
-  VersionEx="10.0.0.1"
-  PlatformID="{2E07F7E4-194C-4D20-B96C-134F72D89D7E}"
-  HvciOptions="0">
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+  PolicyType="Base Policy"
+  xmlns="urn:schemas-microsoft-com:sipolicy">
+
+  <VersionEx>10.0.0.1</VersionEx>
+  <PlatformID>{2E07F7E4-194C-4D20-B96C-134F72D89D7E}</PlatformID>
+  <PolicyID>{A244370E-44C9-4C06-B551-F6016E563076}</PolicyID>
 
   <Rules>
     <Rule>
@@ -47,13 +54,13 @@
       Hash="D9D26C24B4D6DE73B0671A3E4E0553FEF7DA25E6C9ADE03EAD86C1EF12E17F5F"
       HashType="SHA256" />
 
-    <!-- Path-based allow rule -->
+    <!-- Path-based allow rule using the %WINDIR% macro -->
     <Allow
       ID="ID_ALLOW_WINDIR"
       FriendlyName="Allow Windows directory (path rule)"
-      FilePath="%windir%\*" />
+      FilePath="%WINDIR%\*" />
 
-    <!-- Publisher-scoped file attribute rule -->
+    <!-- FileAttrib descriptor for scoping the Google signer rule -->
     <FileAttrib
       ID="ID_FILEATTRIB_CHROME"
       FriendlyName="Google Chrome version constraint"
@@ -75,13 +82,13 @@
       <CertEKU ID="ID_EKU_WINDOWS" />
     </Signer>
 
-    <!-- Microsoft Windows driver signer -->
+    <!-- Microsoft Windows WHQL driver signer -->
     <Signer ID="ID_SIGNER_WHQL_PROD" Name="Microsoft Windows WHQL Driver (Production)">
       <CertRoot Type="TBS" Value="1C3D5B8E2F4A6C9B1D3E5F7A2C4B6D8E0F2A4C6B8D0E2F4A6C8B0D2E4F6A8C0" />
       <CertEKU ID="ID_EKU_WHQL" />
     </Signer>
 
-    <!-- Third-party publisher signer -->
+    <!-- Third-party publisher signer scoped to Google Chrome via FileAttrib -->
     <Signer ID="ID_SIGNER_GOOGLE" Name="Google LLC">
       <CertRoot Type="TBS" Value="7E2D4A6C8B0E2F4A6C8B0D2E4F6A8C0D2E4F6A8C0D2E4F6A8C0D2E4F6A8C0D2" />
       <CertPublisher Value="Google LLC" />
@@ -90,26 +97,23 @@
   </Signers>
 
   <SigningScenarios>
-    <!-- Kernel Mode Signing Scenario (Value=131) -->
-    <SigningScenario Value="131" ID="ID_SIGNINGSCENARIO_DRIVERS_1" MinimumHashAlgorithm="65536">
+    <!-- Kernel Mode Signing Scenario (Value=131) — drivers -->
+    <SigningScenario ID="ID_SIGNINGSCENARIO_DRIVERS_1" FriendlyName="AppControl Studio Sample Policy" Value="131" MinimumHashAlgorithm="65536">
       <ProductSigners>
         <AllowedSigners>
           <AllowedSigner SignerId="ID_SIGNER_WINDOWS_PROD_RS1" />
           <AllowedSigner SignerId="ID_SIGNER_WHQL_PROD" />
         </AllowedSigners>
-        <DeniedSigners />
-        <FileRulesRef />
       </ProductSigners>
     </SigningScenario>
 
-    <!-- User Mode Signing Scenario (Value=12) -->
-    <SigningScenario Value="12" ID="ID_SIGNINGSCENARIO_WINDOWS">
+    <!-- User Mode Signing Scenario (Value=12) — applications -->
+    <SigningScenario ID="ID_SIGNINGSCENARIO_WINDOWS" FriendlyName="AppControl Studio Sample Policy" Value="12">
       <ProductSigners>
         <AllowedSigners>
           <AllowedSigner SignerId="ID_SIGNER_WINDOWS_PROD_RS1" />
           <AllowedSigner SignerId="ID_SIGNER_GOOGLE" />
         </AllowedSigners>
-        <DeniedSigners />
         <FileRulesRef>
           <FileRuleRef RuleID="ID_ALLOW_NOTEPAD" />
           <FileRuleRef RuleID="ID_ALLOW_WINDIR" />
@@ -126,5 +130,20 @@
   <CiSigners>
     <CiSigner SignerId="ID_SIGNER_WINDOWS_PROD_RS1" />
   </CiSigners>
+
+  <HvciOptions>0</HvciOptions>
+
+  <Settings>
+    <Setting Provider="PolicyInfo" Key="Information" ValueName="Name">
+      <Value>
+        <String>AppControl Studio Sample Policy</String>
+      </Value>
+    </Setting>
+    <Setting Provider="PolicyInfo" Key="Information" ValueName="Id">
+      <Value>
+        <String>AppControl Studio Sample Policy</String>
+      </Value>
+    </Setting>
+  </Settings>
 
 </SiPolicy>
