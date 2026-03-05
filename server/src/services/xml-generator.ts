@@ -188,12 +188,13 @@ function serializeFileRule(rule: WdacFileRule): string {
   switch (rule.kind) {
     case "hash": {
       const r = rule as WdacHashRule;
+      // Note: cipolicy.xsd <Allow>/<Deny> elements have no HashType attribute.
+      // hashType is an internal model discriminator only — do not emit it.
       const attrs = [
         `ID="${escapeXml(r.id)}"`,
         ...(r.friendlyName ? [`FriendlyName="${escapeXml(r.friendlyName)}"`] : []),
         ...(r.fileName ? [`FileName="${escapeXml(r.fileName)}"`] : []),
         `Hash="${escapeXml(r.hash)}"`,
-        `HashType="${escapeXml(r.hashType)}"`,
       ];
       return `${I}<${r.effect} ${attrs.join(" ")} />`;
     }
