@@ -229,25 +229,54 @@ export function buildPolicyFromEvents(
         );
       }
     } else if (ruleType === "hash" || (ruleType === "publisher" && !best.signerInfo?.publisherTbsHash)) {
-      // Hash rule — exact SHA256 match
-      const hash = best.sha256FlatHash ?? best.sha256Hash;
-      if (hash && !seenHashes.has(hash)) {
-        seenHashes.add(hash);
-        const ruleId = `ID_ALLOW_${String(fileRules.length + 1).padStart(4, "0")}`;
+      // Hash rules — ConvertFrom-CIPolicy generates one Allow rule per hash type.
+      // When both SHA1 and SHA256 flat hashes are available, emit both (matching
+      // the real cipolicy output: ID_..._SHA1 and ID_..._SHA256).
+      const sha256 = best.sha256FlatHash ?? best.sha256Hash;
+      const sha1   = best.sha1FlatHash ?? best.sha1Hash;
+      let addedAny = false;
+
+      if (sha1 && !seenHashes.has(sha1)) {
+        seenHashes.add(sha1);
+        const seqTag = String(fileRules.length + 1).padStart(4, "0");
+        const ruleId = `ID_ALLOW_${seqTag}_SHA1`;
         fileRules.push({
           kind: "hash",
           id: ruleId,
           effect: "Allow",
           friendlyName: best.fileName
-            ? `Allow ${best.fileName} (SHA256)`
-            : `Allow Hash ${hash.substring(0, 16)}…`,
-          hash,
+            ? `${best.fileName} SHA1 hash allow rule`
+            : `Allow Hash ${sha1.substring(0, 16)}… (SHA1)`,
+          hash: sha1,
+          hashType: "SHA1",
+          ...(best.fileName && { fileName: best.fileName }),
+        } as WdacFileRule);
+        fileRuleIds.push(ruleId);
+        addedAny = true;
+        log.push(`Hash rule: ${best.filePath} (SHA1: ${sha1.substring(0, 16)}…)`);
+      }
+
+      if (sha256 && !seenHashes.has(sha256)) {
+        seenHashes.add(sha256);
+        const seqTag = String(fileRules.length + 1).padStart(4, "0");
+        const ruleId = `ID_ALLOW_${seqTag}_SHA256`;
+        fileRules.push({
+          kind: "hash",
+          id: ruleId,
+          effect: "Allow",
+          friendlyName: best.fileName
+            ? `${best.fileName} SHA256 hash allow rule`
+            : `Allow Hash ${sha256.substring(0, 16)}… (SHA256)`,
+          hash: sha256,
           hashType: "SHA256",
           ...(best.fileName && { fileName: best.fileName }),
         } as WdacFileRule);
         fileRuleIds.push(ruleId);
-        log.push(`Hash rule: ${best.filePath} (SHA256: ${hash.substring(0, 16)}…)`);
-      } else if (!hash) {
+        addedAny = true;
+        log.push(`Hash rule: ${best.filePath} (SHA256: ${sha256.substring(0, 16)}…)`);
+      }
+
+      if (!addedAny) {
         // Fallback: no hash available, try path if enabled
         if (req.includePathRules && best.filePath && !seenPaths.has(best.filePath)) {
           const normalized = best.filePath.toLowerCase();
