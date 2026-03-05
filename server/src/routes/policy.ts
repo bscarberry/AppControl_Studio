@@ -236,6 +236,11 @@ policyRouter.post("/from-events", (req: Request, res: Response) => {
     events: z.array(z.unknown()),
     template: z.enum(["default-windows", "allow-microsoft", "deny-by-default", "blank"]).optional(),
     policyName: z.string().min(1).max(256),
+    ruleSelections: z.array(z.object({
+      fileKey: z.string(),
+      ruleType: z.enum(["publisher", "fileAttrib", "hash", "path", "skip"]),
+    })).optional(),
+    defaultRuleType: z.enum(["publisher", "fileAttrib", "hash", "path", "skip"]).optional(),
     preferPublisherRules: z.boolean().default(true),
     includePathRules: z.boolean().default(false),
     auditMode: z.boolean().default(true),
