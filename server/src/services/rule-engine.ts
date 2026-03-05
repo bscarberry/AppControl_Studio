@@ -556,19 +556,54 @@ function scenarioForEvents(events: ParsedCiEvent[]): "kernel" | "user" | "both" 
 // ---------------------------------------------------------------------------
 
 let _signerSeq = 0;
-let _fileRuleSeq = 0;
-let _attribSeq = 0;
+let _hashRuleSeq = 0;
+let _pathRuleSeq = 0;
+let _attribRuleSeq = 0;
+let _pfnRuleSeq = 0;
+let _fileAttribSeq = 0;
+
+// Rule ID naming follows the WDAC Policy Wizard convention (PolicyHelper.cs):
+//   Signers:          ID_SIGNER_S_{n}
+//   Allow hash rules: ID_ALLOW_HASH_{n}
+//   Deny hash rules:  ID_DENY_HASH_{n}
+//   Allow path rules: ID_ALLOW_PATH_{n}
+//   Deny path rules:  ID_DENY_PATH_{n}
+//   Allow attrib:     ID_ALLOW_A_{n}
+//   Deny attrib:      ID_DENY_D_{n}
+//   Allow PFN:        ID_ALLOW_PFN_{n}
+//   Deny PFN:         ID_DENY_PFN_{n}
+//   FileAttrib:       ID_FILEATTRIB_F_{n}
 
 function nextSignerId(): string {
-  return `ID_SIGNER_${String(++_signerSeq).padStart(4, "0")}`;
+  return `ID_SIGNER_S_${String(++_signerSeq).padStart(4, "0")}`;
 }
 
-function nextFileRuleId(prefix = "ID_ALLOW"): string {
-  return `${prefix}_${String(++_fileRuleSeq).padStart(4, "0")}`;
+function nextHashRuleId(effect: "Allow" | "Deny"): string {
+  return effect === "Allow"
+    ? `ID_ALLOW_HASH_${String(++_hashRuleSeq).padStart(4, "0")}`
+    : `ID_DENY_HASH_${String(++_hashRuleSeq).padStart(4, "0")}`;
+}
+
+function nextPathRuleId(effect: "Allow" | "Deny"): string {
+  return effect === "Allow"
+    ? `ID_ALLOW_PATH_${String(++_pathRuleSeq).padStart(4, "0")}`
+    : `ID_DENY_PATH_${String(++_pathRuleSeq).padStart(4, "0")}`;
+}
+
+function nextAttribRuleId(effect: "Allow" | "Deny"): string {
+  return effect === "Allow"
+    ? `ID_ALLOW_A_${String(++_attribRuleSeq).padStart(4, "0")}`
+    : `ID_DENY_D_${String(++_attribRuleSeq).padStart(4, "0")}`;
+}
+
+function nextPfnRuleId(effect: "Allow" | "Deny"): string {
+  return effect === "Allow"
+    ? `ID_ALLOW_PFN_${String(++_pfnRuleSeq).padStart(4, "0")}`
+    : `ID_DENY_PFN_${String(++_pfnRuleSeq).padStart(4, "0")}`;
 }
 
 function nextFileAttribId(): string {
-  return `ID_FILEATTRIB_${String(++_attribSeq).padStart(4, "0")}`;
+  return `ID_FILEATTRIB_F_${String(++_fileAttribSeq).padStart(4, "0")}`;
 }
 
 function buildSignerProposal(
@@ -715,7 +750,7 @@ function buildHashProposal(
 ): ProposedRule {
   const id = uuidv4();
   const events = group.events;
-  const ruleId = nextFileRuleId(effect === "Allow" ? "ID_ALLOW" : "ID_DENY");
+  const ruleId = nextHashRuleId(effect);
 
   const isSigned = events.some((e) => Boolean(e.signerInfo?.publisherName));
   const representativeEvent = events[0];
@@ -813,7 +848,7 @@ function buildHashProposal(
 function buildPathProposal(group: PathGroup, log: string[]): ProposedRule {
   const id = uuidv4();
   const events = group.events;
-  const ruleId = nextFileRuleId("ID_ALLOW_PATH");
+  const ruleId = nextPathRuleId("Allow");
 
   const risk = riskForPathRule(group.path);
 
@@ -987,8 +1022,11 @@ export function proposeRules(
 ): ProposedPolicyChanges {
   // Reset sequence counters per invocation
   _signerSeq = 0;
-  _fileRuleSeq = 0;
-  _attribSeq = 0;
+  _hashRuleSeq = 0;
+  _pathRuleSeq = 0;
+  _attribRuleSeq = 0;
+  _pfnRuleSeq = 0;
+  _fileAttribSeq = 0;
 
   const log: string[] = [];
   const proposalId = uuidv4();
