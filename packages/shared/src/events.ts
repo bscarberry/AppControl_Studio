@@ -32,15 +32,23 @@ export const CI_EVENT_IDS = {
 
   // -------------------------------------------------------------------------
   // Kernel-mode App Control — enforcement and audit
+  // These events fire for kernel-mode code (signing scenario 131: drivers/boot images).
   // -------------------------------------------------------------------------
-  3033: "The file under validation didn't meet the requirements to pass the App Control policy. May occur alongside a 3077 event if caused by App Control; often a revoked or Lifetime Signing EKU-expired signature.",
-  3034: "The file under validation wouldn't meet the requirements to pass the App Control policy if it was enforced. The file was allowed since the policy is in audit mode.",
+  3033: "A kernel-mode file under validation didn't meet the requirements to pass the App Control policy (enforcement mode). This kernel-mode block event often co-occurs with a revoked or Lifetime Signing EKU-expired signature.",
+  3034: "A kernel-mode file under validation wouldn't meet the requirements to pass the App Control policy if it were enforced. The file was allowed since the policy is in audit mode (kernel-mode audit event).",
 
   // -------------------------------------------------------------------------
   // User-mode DLL enforcement and audit
   // -------------------------------------------------------------------------
   3064: "If the App Control policy was enforced, a user mode DLL under validation wouldn't meet the requirements to pass the App Control policy. The DLL was allowed since the policy is in audit mode.",
   3065: "A user mode DLL under validation didn't meet the requirements to pass the App Control policy.",
+
+  // -------------------------------------------------------------------------
+  // Kernel-mode App Control audit/block via signing level check
+  // Source: WDAC Policy Wizard EventLog.cs (AUDIT_KERNEL_ID / BLOCK_KERNEL_ID)
+  // -------------------------------------------------------------------------
+  3067: "Kernel-mode audit event: A kernel-mode file would have been blocked by the signing level requirements if the App Control policy was enforced. The file was allowed since the policy is in audit mode.",
+  3068: "Kernel-mode block event: A kernel-mode file didn't meet the signing level requirements of the App Control policy and was blocked.",
 
   // -------------------------------------------------------------------------
   // User-mode App Control — audit (policy in audit mode, file NOT blocked)

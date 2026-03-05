@@ -512,13 +512,35 @@ function determineSignerScope(
 // ---------------------------------------------------------------------------
 
 /**
- * Kernel-mode events are identified by event IDs 3001–3003 (driver-level).
- * CI_EVENT_IDS 3001: kernel driver signature failure
- * CI_EVENT_IDS 3002: kernel driver security requirement failure
- * CI_EVENT_IDS 3003: kernel driver requirement failure
+ * Identifies kernel-mode CodeIntegrity events by event ID.
+ *
+ * Kernel-mode events (signing scenario 131):
+ *   3001 — Unsigned driver attempted to load
+ *   3002 — Boot image page hash verification failure
+ *   3004 — Kernel driver page hash not found (invalid signature or /INTEGRITYCHECK)
+ *   3010 — Invalid catalog containing driver signature
+ *   3023 — Driver failed App Control policy requirements (revoked/expired Lifetime Signing EKU)
+ *   3033 — Kernel-mode App Control enforcement block (file fails policy requirements)
+ *   3034 — Kernel-mode App Control audit (file would fail if policy were enforced)
+ *   3067 — Kernel-mode signing level audit (from WDAC Policy Wizard EventLog.cs)
+ *   3068 — Kernel-mode signing level block (from WDAC Policy Wizard EventLog.cs)
+ *
+ * Note: Event ID 3003 is NOT included — it does not appear in Microsoft's official
+ * App Control event ID appendix and was removed from this codebase.
+ * Events 3076/3077 are user-mode only and are excluded here.
  */
 function isKernelEvent(eventId: number): boolean {
-  return eventId === 3001 || eventId === 3002 || eventId === 3003;
+  return (
+    eventId === 3001 ||
+    eventId === 3002 ||
+    eventId === 3004 ||
+    eventId === 3010 ||
+    eventId === 3023 ||
+    eventId === 3033 ||
+    eventId === 3034 ||
+    eventId === 3067 ||
+    eventId === 3068
+  );
 }
 
 function scenarioForEvents(events: ParsedCiEvent[]): "kernel" | "user" | "both" {
