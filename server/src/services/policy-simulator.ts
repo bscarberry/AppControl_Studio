@@ -511,15 +511,21 @@ function matchHash(rule: WdacHashRule, binary: BinaryMetadata): MatchOutcome {
 // Rule matching — path
 // ---------------------------------------------------------------------------
 
-/** WDAC variable macros → canonical Windows paths. */
+/**
+ * Official WDAC path rule macros expanded at runtime by the Windows CI kernel driver.
+ *
+ * Only these three macros are officially supported by the WDAC path rule engine
+ * (cipolicy.xsd, WDAC Policy Wizard Helper.cs). Environment variables such as
+ * %PROGRAMFILES% and %COMMONPROGRAMFILES% are NOT expanded by the WDAC kernel
+ * driver — policies using them would treat the macro as a literal path string.
+ *
+ * Reference: App Control for Business path rule documentation and WDAC Toolkit
+ * Helper.cs path validation logic.
+ */
 const WDAC_MACROS: [string, string][] = [
   ["%WINDIR%", "C:\\Windows"],
   ["%SYSTEM32%", "C:\\Windows\\System32"],
   ["%OSDRIVE%", "C:"],
-  ["%PROGRAMFILES%", "C:\\Program Files"],
-  ["%PROGRAMFILESX86%", "C:\\Program Files (x86)"],
-  ["%COMMONPROGRAMFILES%", "C:\\Program Files\\Common Files"],
-  ["%COMMONPROGRAMFILESX86%", "C:\\Program Files (x86)\\Common Files"],
 ];
 
 function expandMacros(pattern: string): string {

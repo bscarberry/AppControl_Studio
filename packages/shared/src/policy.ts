@@ -23,7 +23,7 @@ export const POLICY_RULE_OPTIONS = {
   7: { name: "Allowed:Debug Policy Augmented", description: "Allows kernel debugger to augment policies (not recommended for production)." },
   8: { name: "Required:EV Signers", description: "Requires Extended Validation (EV) certificates for drivers." },
   9: { name: "Enabled:Advanced Boot Options Menu", description: "Allows users to access the Advanced Boot Options menu, which may allow disabling App Control." },
-  10: { name: "Enabled:Boot Audit on Failure", description: "Causes the system to boot into audit mode if the policy fails to apply." },
+  10: { name: "Enabled:Boot Audit On Failure", description: "Causes the system to boot into audit mode if the policy fails to apply." },
   11: { name: "Disabled:Script Enforcement", description: "Disables script enforcement for PowerShell, WSH, and similar interpreters." },
   12: { name: "Required:Enforce Store Applications", description: "Enforces code integrity for Windows Store (UWP) applications." },
   13: { name: "Enabled:Managed Installer", description: "Enables the managed installer trust mechanism." },

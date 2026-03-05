@@ -264,6 +264,9 @@ function findOptionNumber(name: string): number | undefined {
     "Allowed:Debug Policy Augmented": 7,
     "Required:EV Signers": 8,
     "Enabled:Advanced Boot Options Menu": 9,
+    // Option 10 — capital O in "On" per cipolicy.xsd OptionType enum
+    "Enabled:Boot Audit On Failure": 10,
+    // Legacy lowercase alias — some older policies used lowercase "on"
     "Enabled:Boot Audit on Failure": 10,
     "Disabled:Script Enforcement": 11,
     "Required:Enforce Store Applications": 12,
