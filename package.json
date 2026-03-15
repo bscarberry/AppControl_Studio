@@ -1,6 +1,6 @@
 {
   "name": "appcontrol-studio",
-  "version": "1984.0.0",
+  "version": "1985.0.0",
   "private": true,
   "workspaces": [
     "packages/shared",

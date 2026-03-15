@@ -93,6 +93,7 @@ function EventRow({ event }: { event: ParsedCiEvent }) {
   const publisherCn = publisher
     ? (publisher.match(/CN=([^,]+)/)?.[1] ?? publisher.substring(0, 30))
     : undefined;
+  const policyLabel = event.policyName ?? event.policyId;
 
   return (
     <tr>
@@ -116,6 +117,13 @@ function EventRow({ event }: { event: ParsedCiEvent }) {
           : event.originalFileName
           ? <span className="flex items-center gap-1 text-text-secondary"><Tag size={10} /><span className="truncate max-w-[120px]">{event.originalFileName}</span></span>
           : <span className="text-text-muted">Unsigned</span>}
+      </td>
+      <td className="text-xs max-w-[140px]">
+        {policyLabel
+          ? <span className="truncate block text-text-secondary" title={`${policyLabel}${event.policyGuid ? `\n${event.policyGuid}` : ""}`}>{policyLabel}</span>
+          : event.policyGuid
+          ? <span className="mono text-text-muted truncate block" title={event.policyGuid}>{event.policyGuid.substring(0, 8)}…</span>
+          : <span className="text-text-muted">—</span>}
       </td>
       <td className="mono text-xs text-text-muted">{event.eventId}</td>
     </tr>
@@ -177,6 +185,7 @@ function EventImportResults({ result }: { result: EventImportResult }) {
                 <th>File / Product</th>
                 <th>SHA256 (flat)</th>
                 <th>Publisher / Filename</th>
+                <th>Policy</th>
                 <th>Event ID</th>
               </tr>
             </thead>

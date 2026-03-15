@@ -194,6 +194,8 @@ export interface ParsedCiEvent {
 
   /** PolicyGUID that generated this audit/block event */
   policyGuid?: string;
+  /** PolicyID value from the event (short identifier; may equal policyName) */
+  policyId?: string;
   policyName?: string;
 
   /** Whether this is a block or audit event */

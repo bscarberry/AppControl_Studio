@@ -508,6 +508,7 @@ function parseNamedRecord(
       fileVersion: get("FileVersion"),
       packageFamilyName: get("PackageFamilyName"),
       policyGuid: get("PolicyGuid") ?? get("PolicyGUID"),
+      policyId: get("PolicyID"),
       policyName: get("PolicyName"),
       severity,
       description,
