@@ -107,6 +107,18 @@ export interface CreatePolicyFromEventsRequest {
   template?: "default-windows" | "allow-microsoft" | "deny-by-default" | "blank";
   policyName: string;
   /**
+   * Whether to generate a Base or Supplemental policy.
+   * Defaults to "Supplemental" when building from CI event logs (matching WDAC Wizard behavior).
+   * A supplemental policy adds allow rules on top of an existing enforced base policy.
+   */
+  policyType?: "Base" | "Supplemental";
+  /**
+   * GUID of the base policy this supplemental policy extends.
+   * Required when policyType is "Supplemental".
+   * Populated from the PolicyGuid field in the CI events (the policy that triggered the blocks).
+   */
+  basePolicyId?: string;
+  /**
    * Per-file rule type overrides from the Build Policy review table.
    * When provided these take precedence over the global fallback toggles below.
    */
