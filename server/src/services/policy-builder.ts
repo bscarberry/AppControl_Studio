@@ -29,7 +29,21 @@ import type { CreatePolicyFromEventsRequest } from "@appcontrol/shared";
 
 type TemplateName = NonNullable<CreatePolicyFromEventsRequest["template"]>;
 
-function getTemplateOptions(template: TemplateName): PolicyRuleOption[] {
+/**
+ * Options for a Supplemental policy (matches WDAC Wizard output).
+ * Supplemental policies must NOT include Enabled:UMCI (option 0) — that is
+ * inherited from the base policy. They require:
+ *   6  Enabled:Unsigned System Integrity Policy
+ *   5  Enabled:Inherit Default Policy
+ */
+function getSupplementalOptions(): PolicyRuleOption[] {
+  return [
+    { value: 6, enabled: true }, // Enabled:Unsigned System Integrity Policy
+    { value: 5, enabled: true }, // Enabled:Inherit Default Policy
+  ];
+}
+
+function getBaseTemplateOptions(template: TemplateName): PolicyRuleOption[] {
   const base: PolicyRuleOption[] = [
     { value: 0, enabled: true }, // UMCI
     { value: 6, enabled: true }, // Unsigned system integrity policy
@@ -40,7 +54,6 @@ function getTemplateOptions(template: TemplateName): PolicyRuleOption[] {
       return [
         ...base,
         { value: 2, enabled: true },  // WHQL required
-        { value: 3, enabled: false },
       ];
     case "allow-microsoft":
       return [...base];
@@ -57,6 +70,36 @@ function getTemplateOptions(template: TemplateName): PolicyRuleOption[] {
         { value: 6, enabled: true },
       ];
   }
+}
+
+/**
+ * Extract the GUID of the most common enforcing base policy from the events.
+ * CI events carry the PolicyGuid of the policy that triggered the block/audit.
+ * We pick the most-frequently-occurring non-empty GUID as the default base.
+ */
+function detectBasePolicyId(events: ParsedCiEvent[]): string | undefined {
+  const counts = new Map<string, number>();
+  for (const ev of events) {
+    const guid = ev.policyGuid;
+    if (guid && guid.length > 0) {
+      counts.set(guid, (counts.get(guid) ?? 0) + 1);
+    }
+  }
+  if (counts.size === 0) return undefined;
+  return [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0];
+}
+
+/**
+ * Build the signer Name attribute to match WDAC Wizard format:
+ *   "Allow CN = <publisher CN> issued by <issuer name>"
+ * Falls back gracefully when issuer info is unavailable.
+ */
+function buildSignerName(publisherName?: string, issuerName?: string): string {
+  if (!publisherName) return "Unknown Publisher";
+  // Extract CN value from a full subject DN like "CN=Notepad++,O=...,L=..."
+  const cn = publisherName.match(/^CN=([^,]+)/i)?.[1] ?? publisherName;
+  if (issuerName) return `Allow CN = ${cn} issued by ${issuerName}`;
+  return `Allow CN = ${cn}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -131,13 +174,28 @@ export function buildPolicyFromEvents(
   const log: string[] = [];
   const policyId = uuidv4().toUpperCase();
 
+  // Determine policy type — default to Supplemental when building from CI events
+  // (mirrors WDAC Wizard behavior: event-log policies are supplemental by default)
+  const isSupplemental = (req.policyType ?? "Supplemental") === "Supplemental";
+
+  // Resolve base policy GUID: use explicit override, then auto-detect from events
+  const basePolicyId = isSupplemental
+    ? (req.basePolicyId?.replace(/^\{|\}$/g, "").toUpperCase() || detectBasePolicyId(req.events))
+    : undefined;
+
   log.push(`Building policy '${req.policyName}' from ${req.events.length} events.`);
+  log.push(`Type: ${isSupplemental ? "Supplemental" : "Base"}`);
+  if (basePolicyId) log.push(`Base Policy ID: ${basePolicyId}`);
   log.push(`Template: ${req.template ?? "blank"}`);
   log.push(`Mode: ${req.auditMode ? "Audit" : "Enforcement"}`);
 
-  // Template options
-  const options = getTemplateOptions(req.template ?? "blank");
-  if (req.auditMode) {
+  // Policy options differ for supplemental vs base
+  const options = isSupplemental
+    ? getSupplementalOptions()
+    : getBaseTemplateOptions(req.template ?? "blank");
+
+  // Base policies can start in audit mode; supplemental inherits the base's mode
+  if (!isSupplemental && req.auditMode) {
     const auditIdx = options.findIndex((o) => o.value === 3);
     if (auditIdx >= 0) options[auditIdx].enabled = true;
     else options.push({ value: 3, enabled: true });
@@ -181,31 +239,39 @@ export function buildPolicyFromEvents(
     }
 
     if (ruleType === "publisher" && best.signerInfo?.publisherTbsHash) {
-      // Publisher rule: CertRoot (TBS) + CertPublisher — survives binary updates
+      // Publisher rule: CertRoot (TBS) + CertPublisher — survives binary updates.
+      // Signer IDs use WDAC Wizard format: ID_SIGNER_A_<0-based-counter>
       const fp = best.signerInfo.publisherTbsHash;
       if (!signerFpMap.has(fp)) {
-        const signerId = `ID_SIGNER_${String(signers.length + 1).padStart(4, "0")}`;
+        const signerId = `ID_SIGNER_A_${String(signers.length).padStart(4, "0")}`;
         signerFpMap.set(fp, signerId);
+
+        // Name matches WDAC Wizard: "Allow CN = <leaf CN> issued by <issuer name>"
+        const signerName = buildSignerName(
+          best.signerInfo.publisherName,
+          best.signerInfo.issuerName
+        );
+
+        // CertPublisher value: extract CN from full subject DN if present
+        const certPublisher = best.signerInfo.publisherName
+          ? (best.signerInfo.publisherName.match(/^CN=([^,]+)/i)?.[1] ?? best.signerInfo.publisherName)
+          : undefined;
 
         const signer: WdacSignerRule = {
           id: signerId,
-          name: best.signerInfo.publisherName ?? `Publisher ${signers.length + 1}`,
+          name: signerName,
           certRoot: { type: "TBS", value: fp },
-          ...(best.signerInfo.publisherName && {
-            certPublisher: best.signerInfo.publisherName,
-          }),
+          ...(certPublisher && { certPublisher }),
         };
 
         signers.push(signer);
         allowedSignerIds.push(signerId);
         log.push(
-          `Publisher rule: ${best.signerInfo.publisherName ?? fp} ` +
+          `Publisher rule: ${signerName} ` +
           `(TBS: ${fp.substring(0, 16)}…) — covers: ${best.filePath}`
         );
       } else {
-        log.push(
-          `Publisher rule reused for: ${best.filePath}`
-        );
+        log.push(`Publisher rule reused for: ${best.filePath}`);
       }
     } else if (ruleType === "fileAttrib" && best.originalFileName) {
       // OriginalFileName-based allow rule (attribute rule)
@@ -324,16 +390,16 @@ export function buildPolicyFromEvents(
 
   log.push(`Total: ${fileRules.length} file rule(s), ${signers.length} signer rule(s)`);
 
-  // Build signing scenarios
+  // Build signing scenarios.
+  // Supplemental policies omit MinimumHashAlgorithm on KMCI (inherited from base).
   const userAllowedSigners: AllowedSigner[] = allowedSignerIds.map((id) => ({ signerId: id }));
-  const kernelAllowedSigners: AllowedSigner[] = [];
 
   const signingScenarios: WdacSigningScenario[] = [
     {
       value: 131,
       id: "ID_SIGNINGSCENARIO_DRIVERS_1",
-      minHashVersion: "65536",
-      allowedSigners: kernelAllowedSigners,
+      ...(isSupplemental ? {} : { minHashVersion: "65536" }),
+      allowedSigners: [],
       deniedSigners: [],
       fileRuleRefs: [],
     },
@@ -348,10 +414,11 @@ export function buildPolicyFromEvents(
 
   const policy: WdacPolicy = {
     policyId,
+    ...(basePolicyId && { basePolicyId }),
     platformId: "2E07F7E4-194C-4D20-B7C9-6F44A6C5A234",
     versionEx: "10.0.0.0",
     friendlyName: req.policyName,
-    policyType: "Base",
+    policyType: isSupplemental ? "Supplemental" : "Base",
     options,
     ekus: [],
     fileRules,

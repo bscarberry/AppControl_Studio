@@ -858,6 +858,10 @@ interface UniqueFileRow {
   hasAttributes: boolean;
   severity: "block" | "audit" | "info";
   eventCount: number;
+  /** GUID of the base policy that triggered the block/audit for this file */
+  triggeringPolicyGuid?: string;
+  /** Human-readable name of the triggering base policy */
+  triggeringPolicyName?: string;
 }
 
 function buildUniqueFiles(events: ParsedCiEvent[]): UniqueFileRow[] {
@@ -895,10 +899,30 @@ function buildUniqueFiles(events: ParsedCiEvent[]): UniqueFileRow[] {
         hasAttributes,
         severity: ev.severity,
         eventCount: 1,
+        triggeringPolicyGuid: ev.policyGuid,
+        triggeringPolicyName: ev.policyName,
       });
     }
   }
   return Array.from(map.values());
+}
+
+/** Returns distinct base policies detected in events, sorted by frequency. */
+function detectBasePolicies(events: ParsedCiEvent[]): Array<{ guid: string; name?: string; count: number }> {
+  const map = new Map<string, { name?: string; count: number }>();
+  for (const ev of events) {
+    if (!ev.policyGuid) continue;
+    const existing = map.get(ev.policyGuid);
+    if (existing) {
+      existing.count++;
+      if (!existing.name && ev.policyName) existing.name = ev.policyName;
+    } else {
+      map.set(ev.policyGuid, { name: ev.policyName, count: 1 });
+    }
+  }
+  return [...map.entries()]
+    .map(([guid, { name, count }]) => ({ guid, name, count }))
+    .sort((a, b) => b.count - a.count);
 }
 
 // ---------------------------------------------------------------------------
@@ -952,6 +976,13 @@ function FileRuleRow({
           : <span className="text-text-muted italic">Unsigned</span>}
       </td>
       <td className="mono text-xs text-text-muted">{hash ? `${hash.substring(0, 14)}…` : "—"}</td>
+      <td className="text-xs max-w-[160px]">
+        {row.triggeringPolicyName
+          ? <span className="truncate block text-text-secondary" title={`${row.triggeringPolicyName}\n${row.triggeringPolicyGuid ?? ""}`}>{row.triggeringPolicyName}</span>
+          : row.triggeringPolicyGuid
+          ? <span className="mono text-text-muted truncate block" title={row.triggeringPolicyGuid}>{row.triggeringPolicyGuid.substring(0, 8)}…</span>
+          : <span className="text-text-muted italic">—</span>}
+      </td>
       <td>
         <div className="flex gap-1 flex-wrap">
           {row.hasPublisher && <span className="tag tag-blue text-[10px]">Pub</span>}
@@ -987,11 +1018,19 @@ function BuildPolicyTab({ onSwitchToCiEvents }: { onSwitchToCiEvents: () => void
     template: "blank" as Template,
     auditMode: true,
     preferPublisherRules: true,
+    policyType: "Supplemental" as "Base" | "Supplemental",
+    basePolicyId: "",
   });
   const [ruleOverrides, setRuleOverrides] = useState<Map<string, FileRuleType>>(new Map());
   const [result, setResult] = useState<CreatePolicyFromEventsResponse | null>(null);
 
   const uniqueFiles = useMemo(() => buildUniqueFiles(importedEvents), [importedEvents]);
+
+  // Detect base policies from the imported events
+  const detectedBasePolicies = useMemo(() => detectBasePolicies(importedEvents), [importedEvents]);
+
+  // Auto-populate basePolicyId from the most common triggering policy when events are loaded
+  const autoBasePolicyId = detectedBasePolicies[0]?.guid ?? "";
 
   // Resolved rule type per file (override → default)
   const resolvedType = (row: UniqueFileRow): FileRuleType =>
@@ -1009,10 +1048,13 @@ function BuildPolicyTab({ onSwitchToCiEvents }: { onSwitchToCiEvents: () => void
         fileKey: f.key,
         ruleType: resolvedType(f),
       }));
+      const basePolicyId = options.basePolicyId.trim() || autoBasePolicyId;
       return policyApi.fromEvents({
         events: importedEvents,
         policyName: options.policyName,
         template: options.template,
+        policyType: options.policyType,
+        ...(options.policyType === "Supplemental" && basePolicyId ? { basePolicyId } : {}),
         ruleSelections,
         preferPublisherRules: options.preferPublisherRules,
         includePathRules: false,
@@ -1072,6 +1114,70 @@ function BuildPolicyTab({ onSwitchToCiEvents }: { onSwitchToCiEvents: () => void
         {/* Policy settings */}
         <div className="card p-4">
           <h2 className="section-header">Policy Settings</h2>
+
+          {/* Policy Type — Supplemental is the default for event-log-based policies */}
+          <div className="mb-4">
+            <label className="text-xs font-medium text-text-secondary block mb-1.5">Policy Type</label>
+            <div className="flex gap-2">
+              {(["Supplemental", "Base"] as const).map((t) => (
+                <button key={t} onClick={() => setOptions((o) => ({ ...o, policyType: t }))}
+                  className={clsx("px-3 py-1.5 rounded border text-xs transition-colors",
+                    options.policyType === t
+                      ? "border-accent-blue bg-accent-blue-dim/20 text-text-primary font-medium"
+                      : "border-border text-text-secondary hover:border-border-strong")}>
+                  {t === "Supplemental" ? "Supplemental (recommended)" : "Base Policy"}
+                </button>
+              ))}
+            </div>
+            {options.policyType === "Supplemental" && (
+              <p className="text-[10px] text-text-muted mt-1.5">
+                Adds allow rules on top of an existing enforced base policy. Inherits options and
+                signing scenarios from the base.
+              </p>
+            )}
+          </div>
+
+          {/* Base Policy ID — shown only for supplemental; auto-detected from events */}
+          {options.policyType === "Supplemental" && (
+            <div className="mb-4">
+              <label className="text-xs font-medium text-text-secondary block mb-1.5">
+                Base Policy ID
+                <span className="ml-1 text-text-muted font-normal">(PolicyGUID of the enforcing base policy)</span>
+              </label>
+              {detectedBasePolicies.length > 0 ? (
+                <div className="space-y-1.5">
+                  {/* Show detected GUIDs as selectable chips */}
+                  <div className="flex flex-wrap gap-1.5">
+                    {detectedBasePolicies.map(({ guid, name, count }) => {
+                      const isActive = (options.basePolicyId || autoBasePolicyId) === guid;
+                      return (
+                        <button key={guid}
+                          onClick={() => setOptions((o) => ({ ...o, basePolicyId: guid }))}
+                          className={clsx("text-[10px] px-2 py-1 rounded border transition-colors text-left",
+                            isActive
+                              ? "border-accent-blue bg-accent-blue-dim/20 text-text-primary"
+                              : "border-border text-text-secondary hover:border-border-strong")}>
+                          <span className="font-medium">{name ?? guid}</span>
+                          {name && <span className="text-text-muted ml-1 mono">{guid.substring(0, 8)}…</span>}
+                          <span className="text-text-muted ml-1">({count} events)</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <input className="input mono text-xs"
+                    value={options.basePolicyId || autoBasePolicyId}
+                    onChange={(e) => setOptions((o) => ({ ...o, basePolicyId: e.target.value }))}
+                    placeholder="XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX" />
+                </div>
+              ) : (
+                <input className="input mono text-xs"
+                  value={options.basePolicyId}
+                  onChange={(e) => setOptions((o) => ({ ...o, basePolicyId: e.target.value }))}
+                  placeholder="Paste base policy GUID — e.g. 4E61C68C-97F6-430B-9CD7-9B1004706770" />
+              )}
+            </div>
+          )}
+
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="text-xs font-medium text-text-secondary block mb-1.5">Policy Name</label>
@@ -1082,7 +1188,7 @@ function BuildPolicyTab({ onSwitchToCiEvents }: { onSwitchToCiEvents: () => void
             <div className="flex items-end gap-3">
               <Toggle
                 label="Start in Audit Mode"
-                description="Option 3 — recommended for initial testing."
+                description="Option 3 — recommended for initial testing. (Base policies only)"
                 checked={options.auditMode}
                 onChange={(v) => setOptions((o) => ({ ...o, auditMode: v }))}
               />
@@ -1144,6 +1250,7 @@ function BuildPolicyTab({ onSwitchToCiEvents }: { onSwitchToCiEvents: () => void
                   <th>File / Product</th>
                   <th>Publisher / Filename</th>
                   <th>SHA256 (flat)</th>
+                  <th>Triggering Policy</th>
                   <th>Available</th>
                   <th>Rule Type</th>
                 </tr>
