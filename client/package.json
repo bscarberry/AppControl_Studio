@@ -1,6 +1,6 @@
 {
   "name": "@appcontrol/client",
-  "version": "1985.0.0",
+  "version": "1984.0.1",
   "private": true,
   "type": "module",
   "scripts": {
