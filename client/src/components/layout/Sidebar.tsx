@@ -1,3 +1,6 @@
+// Injected at build time by vite.config.ts define.__APP_VERSION__
+declare const __APP_VERSION__: string;
+
 import { NavLink } from "react-router-dom";
 import {
   Shield,
@@ -171,6 +174,7 @@ export function Sidebar() {
         {isMsalEnabled && <MsalUserFooter />}
         <p className="text-xs text-text-muted">Local processing only.</p>
         <p className="text-xs text-text-muted">No data leaves your machine.</p>
+        <p className="text-[10px] text-text-muted opacity-50">v{__APP_VERSION__}</p>
       </div>
     </aside>
   );
