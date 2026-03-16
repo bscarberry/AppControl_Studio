@@ -98,7 +98,11 @@ function buildSignerName(publisherName?: string, issuerName?: string): string {
   if (!publisherName) return "Unknown Publisher";
   // Extract CN value from a full subject DN like "CN=Notepad++,O=...,L=..."
   const cn = publisherName.match(/^CN=([^,]+)/i)?.[1] ?? publisherName;
-  if (issuerName) return `Allow CN = ${cn} issued by ${issuerName}`;
+  if (issuerName) {
+    // Extract CN from issuer DN too — matches WDAC Wizard format
+    const issuerCn = issuerName.match(/^CN=([^,]+)/i)?.[1] ?? issuerName;
+    return `Allow CN = ${cn} issued by ${issuerCn}`;
+  }
   return `Allow CN = ${cn}`;
 }
 
@@ -238,10 +242,11 @@ export function buildPolicyFromEvents(
       continue;
     }
 
-    if (ruleType === "publisher" && best.signerInfo?.publisherTbsHash) {
-      // Publisher rule: CertRoot (TBS) + CertPublisher — survives binary updates.
+    if (ruleType === "publisher" && best.signerInfo?.issuerTbsHash) {
+      // Publisher rule: CertRoot (TBS of issuer/root CA) + CertPublisher (leaf CN).
+      // CertRoot pins the CA chain; CertPublisher scopes to the leaf cert's CN.
       // Signer IDs use WDAC Wizard format: ID_SIGNER_A_<0-based-counter>
-      const fp = best.signerInfo.publisherTbsHash;
+      const fp = best.signerInfo.issuerTbsHash;
       if (!signerFpMap.has(fp)) {
         const signerId = `ID_SIGNER_A_${String(signers.length).padStart(4, "0")}`;
         signerFpMap.set(fp, signerId);
