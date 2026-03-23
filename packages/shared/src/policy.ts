@@ -105,6 +105,12 @@ export interface WdacPathRule {
   effect: FileRuleEffect;
   friendlyName?: string;
   filePath: string;
+  /**
+   * True when this rule targets a directory and all its subdirectories
+   * (a "Folder Path" rule in WDAC Wizard terminology).
+   * The filePath will typically end with \* or contain a wildcard.
+   */
+  isFolder?: boolean;
   minimumFileVersion?: string;
   maximumFileVersion?: string;
 }
@@ -180,6 +186,18 @@ export interface WdacCertEku {
   ekuId: string;
 }
 
+/**
+ * Publisher rule specificity — mirrors the WDAC Policy Wizard specificity slider.
+ *
+ * PCACertificate  (broadest)  — Trust anything signed by this root/PCA CA.
+ *                               CertRoot only; no CertPublisher or FileAttrib.
+ * Publisher                   — Trust all files from this specific publisher CN.
+ *                               CertRoot + CertPublisher; no FileAttrib.
+ * FilePublisher   (narrowest) — Trust this specific file from this publisher.
+ *                               CertRoot + CertPublisher + FileAttrib (FileName + MinVersion).
+ */
+export type SignerSpecificity = "PCACertificate" | "Publisher" | "FilePublisher";
+
 export interface WdacSignerRule {
   id: string;
   name: string;
@@ -190,6 +208,12 @@ export interface WdacSignerRule {
   certOemID?: string;
   /** References to FileAttrib rules that scope this signer */
   fileAttribRefs?: string[];
+  /**
+   * The specificity level of this publisher rule (WDAC Wizard concept).
+   * Informational — derived from the cert fields present.
+   * Not persisted to XML; set by the UI / rule engine for display guidance.
+   */
+  specificity?: SignerSpecificity;
 }
 
 // ---------------------------------------------------------------------------
@@ -224,6 +248,19 @@ export interface WdacSigningScenario {
 
 export type PolicyType = "Base" | "Supplemental";
 
+/**
+ * Policy deployment format.
+ *
+ * MultiplePolicy (modern default) — Supports deploying multiple policies simultaneously.
+ *   Required for Windows 10 1903+ multi-policy deployment.
+ *   Each policy has a unique PolicyID GUID.
+ *
+ * SinglePolicy (legacy) — Only one policy allowed on the system.
+ *   Uses a fixed reserved PolicyID: {A244370E-44C9-4C06-B551-F6016E563076}.
+ *   Required for pre-1903 Windows 10 or UEFI Secure Boot enforcement.
+ */
+export type PolicyFormat = "MultiplePolicy" | "SinglePolicy";
+
 export interface WdacPolicy {
   /** Unique GUID identifying this policy */
   policyId: string;
@@ -254,6 +291,13 @@ export interface WdacPolicy {
 
   /** Hypervisor Code Integrity options bitmask */
   hvciOptions?: number;
+
+  /**
+   * Policy deployment format — MultiplePolicy (modern, default) or SinglePolicy (legacy).
+   * Affects the PolicyID used and XML root attributes in the generated file.
+   * Defaults to MultiplePolicy when not specified.
+   */
+  policyFormat?: PolicyFormat;
 
   /** Parsed from file — source filename for display */
   sourceFileName?: string;

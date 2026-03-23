@@ -1,5 +1,6 @@
 import { Router, Request, Response } from "express";
 import { z } from "zod";
+import crypto from "crypto";
 import { parseWdacXml } from "../services/xml-parser.js";
 import { generateWdacXml } from "../services/xml-generator.js";
 import { comparePolicies } from "../services/policy-comparator.js";
@@ -9,6 +10,8 @@ import { proposeRules } from "../services/rule-engine.js";
 import { simulateBinary } from "../services/policy-simulator.js";
 import { semanticComparePolicies } from "../services/semantic-comparator.js";
 import { ingestAdvancedHunting } from "../services/advanced-hunting-ingestor.js";
+import { mergePolicies } from "../services/policy-merger.js";
+import { convertAppLockerToWdac } from "../services/applocker-converter.js";
 import { validateXmlInput } from "../middleware/xml-validator.js";
 import { getAuditLogger, hashInput } from "../services/audit-logger.js";
 import { DEFAULT_CONFIG } from "../config/security-config.js";
@@ -429,5 +432,206 @@ policyRouter.post("/simulate", (req: Request, res: Response) => {
       errorMessage: (err as Error).message,
     });
     res.status(422).json({ ok: false, error: { code: "SIMULATE_ERROR", message: (err as Error).message } });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Merge multiple policies (WDAC Wizard parity: up to 15 policies)
+// ---------------------------------------------------------------------------
+
+policyRouter.post("/merge", (req: Request, res: Response) => {
+  const schema = z.object({
+    xmlFiles: z.array(z.string().min(1)).min(2).max(15),
+    friendlyName: z.string().optional(),
+  });
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ ok: false, error: { code: "INVALID_REQUEST", message: parsed.error.message } });
+    return;
+  }
+
+  const start = Date.now();
+  const logger = getAuditLogger();
+
+  try {
+    for (const xml of parsed.data.xmlFiles) {
+      if (rejectBadXml(xml, res)) return;
+    }
+
+    const policies = parsed.data.xmlFiles.map((xml, i) => {
+      const { policy, diagnostics } = parseWdacXml(xml, `policy-${i + 1}.xml`);
+      return policy;
+    });
+
+    const { policy, log, stats } = mergePolicies(policies, parsed.data.friendlyName);
+    const xml = generateWdacXml(policy);
+
+    logger.log("POLICY_GENERATED", {
+      role: req.userRole,
+      outputSummary: `merge: ${stats.inputPolicies} policies → ${stats.dedupedFileRules} file rules, ${stats.dedupedSigners} signers`,
+      durationMs: Date.now() - start,
+      succeeded: true,
+    });
+
+    res.json({ ok: true, data: { policy, xml, mergeLog: log, stats } });
+  } catch (err) {
+    logger.log("POLICY_GENERATED", {
+      role: req.userRole,
+      durationMs: Date.now() - start,
+      succeeded: false,
+      errorCode: "MERGE_ERROR",
+      errorMessage: (err as Error).message,
+    });
+    res.status(422).json({ ok: false, error: { code: "MERGE_ERROR", message: (err as Error).message } });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Certificate file → publisher metadata (for AddSignerDialog)
+// ---------------------------------------------------------------------------
+
+policyRouter.post("/cert-info", (req: Request, res: Response) => {
+  const schema = z.object({
+    certBase64: z.string().min(1),
+    fileName: z.string().optional(),
+  });
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ ok: false, error: { code: "INVALID_REQUEST", message: parsed.error.message } });
+    return;
+  }
+
+  try {
+    const buf = Buffer.from(parsed.data.certBase64, "base64");
+
+    // Support PEM wrapping
+    let derBuf = buf;
+    const pemStr = buf.toString("ascii");
+    if (pemStr.includes("-----BEGIN CERTIFICATE-----")) {
+      const b64 = pemStr
+        .replace(/-----BEGIN CERTIFICATE-----|-----END CERTIFICATE-----|\s/g, "");
+      derBuf = Buffer.from(b64, "base64");
+    }
+
+    // Node.js built-in X.509 (available since Node 15.6)
+    const cert = new crypto.X509Certificate(derBuf);
+
+    // Extract CN from subject/issuer distinguished name strings
+    const extractCN = (dn: string): string => {
+      const m = dn.match(/CN=([^,]+)/i);
+      return m ? m[1].trim() : dn;
+    };
+
+    // Compute TBSCertificate SHA-256 hash (the "TBS hash" used in WdacSignerRule.certRoot)
+    // Node's X509Certificate.raw is the full DER. We need to hash just the TBSCertificate
+    // portion. The TBS starts after the outer SEQUENCE wrapper.
+    // Full DER: SEQUENCE { TBSCertificate, signatureAlgorithm, signatureValue }
+    // To extract TBS: skip the outer SEQUENCE tag+length, read the next SEQUENCE
+    let tbsHash = "";
+    try {
+      const der = cert.raw;
+      // Skip outer SEQUENCE tag (0x30) and length
+      let offset = 0;
+      if (der[offset] !== 0x30) throw new Error("Not a SEQUENCE");
+      offset++;
+      // Parse length
+      if (der[offset] & 0x80) {
+        const numLen = der[offset] & 0x7f;
+        offset += 1 + numLen;
+      } else {
+        offset++;
+      }
+      // Now at TBSCertificate SEQUENCE
+      const tbsStart = offset;
+      if (der[offset] !== 0x30) throw new Error("TBS is not a SEQUENCE");
+      offset++;
+      let tbsLen = 0;
+      if (der[offset] & 0x80) {
+        const numLen = der[offset] & 0x7f;
+        for (let i = 0; i < numLen; i++) {
+          tbsLen = (tbsLen << 8) | der[offset + 1 + i];
+        }
+        offset += 1 + numLen;
+      } else {
+        tbsLen = der[offset];
+        offset++;
+      }
+      const tbsEnd = offset + tbsLen;
+      const tbsBytes = der.slice(tbsStart, tbsEnd);
+      tbsHash = crypto.createHash("sha256").update(tbsBytes).digest("hex").toUpperCase();
+    } catch {
+      // Fallback: hash the whole cert raw bytes
+      tbsHash = crypto.createHash("sha256").update(cert.raw).digest("hex").toUpperCase();
+    }
+
+    // Detect code signing EKU (1.3.6.1.5.5.7.3.3)
+    const ekuRaw = cert.infoAccessAIA ?? "";
+    const isCodeSigning = cert.toString().includes("1.3.6.1.5.5.7.3.3")
+      || (cert as unknown as Record<string, unknown>).extendedKeyUsage?.toString().includes("Code Signing") ?? false;
+
+    // Detect CA (basic constraints)
+    const isCa = cert.ca;
+
+    res.json({
+      ok: true,
+      data: {
+        subjectCN: extractCN(cert.subject),
+        subjectDN: cert.subject,
+        issuerCN: extractCN(cert.issuer),
+        issuerDN: cert.issuer,
+        tbsHash,
+        serialNumber: cert.serialNumber,
+        notBefore: cert.validFrom,
+        notAfter: cert.validTo,
+        isCodeSigning,
+        isCa,
+      },
+    });
+  } catch (err) {
+    res.status(422).json({ ok: false, error: { code: "CERT_PARSE_ERROR", message: (err as Error).message } });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// AppLocker XML → WDAC Policy conversion
+// ---------------------------------------------------------------------------
+
+policyRouter.post("/convert-applocker", (req: Request, res: Response) => {
+  const schema = z.object({
+    appLockerXml: z.string().min(1),
+    includeDenyRules: z.boolean().optional(),
+  });
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ ok: false, error: { code: "INVALID_REQUEST", message: parsed.error.message } });
+    return;
+  }
+
+  const start = Date.now();
+  const logger = getAuditLogger();
+
+  try {
+    const result = convertAppLockerToWdac(
+      parsed.data.appLockerXml,
+      parsed.data.includeDenyRules ?? false
+    );
+
+    logger.log("POLICY_GENERATED", {
+      role: req.userRole,
+      outputSummary: `applocker-convert: ${result.stats.publisherRules}p ${result.stats.hashRules}h ${result.stats.pathRules}pa rules`,
+      durationMs: Date.now() - start,
+      succeeded: true,
+    });
+
+    res.json({ ok: true, data: result });
+  } catch (err) {
+    logger.log("POLICY_GENERATED", {
+      role: req.userRole,
+      durationMs: Date.now() - start,
+      succeeded: false,
+      errorCode: "APPLOCKER_CONVERT_ERROR",
+      errorMessage: (err as Error).message,
+    });
+    res.status(422).json({ ok: false, error: { code: "APPLOCKER_CONVERT_ERROR", message: (err as Error).message } });
   }
 });

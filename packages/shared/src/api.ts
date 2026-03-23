@@ -67,17 +67,82 @@ export interface ComparePoliciesResponse {
   comparison: PolicyComparisonResult;
 }
 
-/** POST /api/policy/merge — merge multiple policies into one */
+/**
+ * POST /api/policy/merge — merge 2–15 policies into one.
+ *
+ * The merged policy inherits its PolicyID, FriendlyName, and VersionEx from
+ * the FIRST policy in the list (matching WDAC Wizard behavior). Rule IDs are
+ * re-namespaced to avoid collisions.
+ */
 export interface MergePoliciesRequest {
-  baseXml: string;
-  supplementXml: string;
-  /** How to handle conflicts: 'union' (default) or 'base-wins' */
-  conflictResolution?: "union" | "base-wins";
+  /** Array of raw XML strings, 2–15 policies. Order matters: first policy sets the base ID. */
+  xmlFiles: string[];
+  /** Override the merged policy's friendly name. Defaults to first policy's name. */
+  friendlyName?: string;
 }
 
 export interface MergePoliciesResponse {
   policy: WdacPolicy;
+  xml: string;
   mergeLog: string[];
+  stats: {
+    inputPolicies: number;
+    totalFileRules: number;
+    dedupedFileRules: number;
+    totalSigners: number;
+    dedupedSigners: number;
+  };
+}
+
+/**
+ * POST /api/policy/cert-info — extract publisher metadata from a certificate file.
+ * Accepts DER (.cer/.crt) or PEM (.pem) X.509 certificates.
+ */
+export interface CertInfoRequest {
+  /** Base64-encoded certificate file content */
+  certBase64: string;
+  fileName?: string;
+}
+
+export interface CertInfoResponse {
+  subjectCN: string;
+  subjectDN: string;
+  issuerCN: string;
+  issuerDN: string;
+  /** TBSCertificate SHA-256 hash (hex) — use as certRoot value */
+  tbsHash: string;
+  serialNumber: string;
+  notBefore: string;
+  notAfter: string;
+  isCodeSigning: boolean;
+  isCa: boolean;
+}
+
+/**
+ * POST /api/policy/convert-applocker — convert an AppLocker XML policy to WDAC rules.
+ *
+ * FilePublisherRule → WdacSignerRule (+ optional WdacFileAttrib for FilePublisher specificity)
+ * FileHashRule      → WdacHashRule (SHA-256 preferred, SHA-1 fallback)
+ * FilePathRule      → WdacPathRule
+ * PackagedAppRule   → WdacPackageRule
+ */
+export interface ConvertAppLockerRequest {
+  appLockerXml: string;
+  /** Convert Deny rules too (default false — deny rules can cause lockouts) */
+  includeDenyRules?: boolean;
+}
+
+export interface ConvertAppLockerResponse {
+  policy: WdacPolicy;
+  xml: string;
+  convertLog: string[];
+  stats: {
+    publisherRules: number;
+    hashRules: number;
+    pathRules: number;
+    packageRules: number;
+    skippedRules: number;
+  };
 }
 
 /**
