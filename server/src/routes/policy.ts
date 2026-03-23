@@ -565,9 +565,8 @@ policyRouter.post("/cert-info", (req: Request, res: Response) => {
     }
 
     // Detect code signing EKU (1.3.6.1.5.5.7.3.3)
-    const ekuRaw = cert.infoAccessAIA ?? "";
     const isCodeSigning = cert.toString().includes("1.3.6.1.5.5.7.3.3")
-      || (cert as unknown as Record<string, unknown>).extendedKeyUsage?.toString().includes("Code Signing") ?? false;
+      || !!((cert as unknown as Record<string, unknown>).extendedKeyUsage?.toString().includes("Code Signing"));
 
     // Detect CA (basic constraints)
     const isCa = cert.ca;
