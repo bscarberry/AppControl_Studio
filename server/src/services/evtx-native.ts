@@ -17,8 +17,12 @@
 
 import { spawn } from "child_process";
 
-// Path to evtx_dump binary. Cargo installs to ~/.cargo/bin by default.
-const EVTX_DUMP = process.env.EVTX_DUMP_PATH ?? "/root/.cargo/bin/evtx_dump";
+// Path to evtx_dump binary.
+// Default: bundled binary at server/bin/evtx_dump (relative to the compiled app.js in server/dist/).
+// Override: set EVTX_DUMP_PATH env var.
+import path from "path";
+const EVTX_DUMP = process.env.EVTX_DUMP_PATH
+  ?? path.join(__dirname, "..", "bin", "evtx_dump");
 
 // CodeIntegrity event IDs we care about
 const CI_IDS = new Set([
