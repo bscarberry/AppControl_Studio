@@ -1,24 +1,24 @@
 /**
  * Cross-platform EVTX binary parser.
  *
- * Uses @ts-evtx/core's low-level EvtxFile API to call record.renderXml()
- * on each record, then parses the resulting standard Windows XML with
- * fast-xml-parser to extract named EventData fields.
+ * Uses evtx_dump (https://github.com/omerbenamram/evtx) as a subprocess.
+ * evtx_dump correctly handles UTF-16LE strings, binary fields, and all EVTX
+ * binary template types — none of the bugs present in @ts-evtx/core.
  *
- * Using renderXml() instead of the high-level evtx() query builder is
- * intentional: the builder's data.items extraction relies on internal BXML
- * template layout heuristics that miss named <Data> fields on CodeIntegrity
- * events. renderXml() produces the same XML structure as Windows Event
- * Viewer, guaranteeing the <Data Name="..."> elements are present.
+ * The EVTX buffer is written to evtx_dump's stdin; records are streamed back
+ * as JSON Lines (one JSON object per line) and filtered to CI event IDs.
+ *
+ * Install: cargo install evtx
+ * Override binary path: EVTX_DUMP_PATH env var (default: evtx_dump)
  *
  * Named-field record shape (mirrors the PowerShell ToXml() output format):
  *   { EventId, TimeCreated, MachineName, ActivityId, Level, Fields }
  */
 
-import path from "path";
-import os from "os";
-import { promises as fs } from "fs";
-import { XMLParser } from "fast-xml-parser";
+import { spawn } from "child_process";
+
+// Path to evtx_dump binary. Cargo installs to ~/.cargo/bin by default.
+const EVTX_DUMP = process.env.EVTX_DUMP_PATH ?? "/root/.cargo/bin/evtx_dump";
 
 // CodeIntegrity event IDs we care about
 const CI_IDS = new Set([
@@ -39,104 +39,73 @@ interface NamedRecord {
 }
 
 /**
- * @ts-evtx/core has a bug where WString substitution fields in CodeIntegrity
- * events (e.g. PublisherName, IssuerName in event 3089) are decoded as if the
- * UTF-16LE bytes are big-endian, producing codepoints like U+4E00 (一) when
- * the actual character is U+004E ('N').  Each code unit's two bytes are simply
- * swapped.
+ * Parse one JSONL line from evtx_dump into a NamedRecord.
  *
- * Detection: if ≥70% of characters have their low byte = 0x00, the string is
- * almost certainly a garbled ASCII/Latin string (real ASCII in UTF-16LE has
- * the null byte as the HIGH byte; decoded as BE it ends up as the LOW byte).
- * We swap the bytes of every code unit and strip any leading garbage bytes
- * that fall outside printable ASCII (artefacts of BXML length-prefix bytes
- * that the parser sometimes includes at the start of the decoded string).
+ * evtx_dump JSON structure:
+ *   Event.System.EventID               — number, or {#attributes:{Qualifiers}, #text: number}
+ *   Event.System.TimeCreated.#attributes.SystemTime — ISO-8601 string
+ *   Event.System.Correlation.#attributes.ActivityID — GUID string
+ *   Event.System.Computer              — string
+ *   Event.System.Level                 — number
+ *   Event.EventData.Data               — array of {#attributes:{Name}, #text?}
  */
-function fixGarbledUtf16(str: string): string {
-  if (!str || str.length < 2) return str;
-  const chars = Array.from(str);
-  const garbledCount = chars.filter(c => (c.codePointAt(0)! & 0xff) === 0).length;
-  if (garbledCount < chars.length * 0.7) return str; // looks like a real string
-  const fixed = chars
-    .map(c => {
-      const cp = c.codePointAt(0)!;
-      const swapped = ((cp & 0xff) << 8) | ((cp >> 8) & 0xff);
-      return String.fromCodePoint(swapped || cp);
-    })
-    .join("")
-    .replace(/^[^\x20-\x7e\u00a0-\u00ff]+/, ""); // strip leading BXML artefacts
-  return fixed || str;
-}
-
-// fast-xml-parser configured to match the EVTX XML schema:
-//  - ignoreAttributes: false  — keep SystemTime, ActivityID, Name attrs
-//  - attributeNamePrefix: ""  — e.g. Data.Name instead of Data.@_Name
-//  - isArray for "Data"       — always treat EventData/Data as array
-const xmlParser = new XMLParser({
-  ignoreAttributes: false,
-  attributeNamePrefix: "",
-  textNodeName: "#text",
-  parseAttributeValue: false,
-  isArray: (_name, jpath) =>
-    jpath === "Event.EventData.Data" || _name === "Data",
-});
-
-function xmlToNamedRecord(xmlStr: string): NamedRecord | null {
+function parseJsonlLine(line: string): NamedRecord | null {
   let doc: Record<string, unknown>;
   try {
-    doc = xmlParser.parse(xmlStr) as Record<string, unknown>;
+    doc = JSON.parse(line);
   } catch {
     return null;
   }
 
-  const ev = (doc as { Event?: Record<string, unknown> }).Event;
+  const ev = doc.Event as Record<string, unknown> | undefined;
   if (!ev) return null;
 
-  const sys = (ev.System ?? {}) as Record<string, unknown>;
+  const sys = ev.System as Record<string, unknown> | undefined;
+  if (!sys) return null;
 
-  // EventID can be a plain number or an object when Qualifiers attr is present
-  const rawEventId = sys.EventID;
+  // EventID: plain number or {#attributes:{Qualifiers:"0"}, #text: number}
+  const rawId = sys.EventID;
   const eventId =
-    typeof rawEventId === "object" && rawEventId !== null
-      ? Number((rawEventId as Record<string, unknown>)["#text"])
-      : Number(rawEventId);
+    rawId !== null && typeof rawId === "object"
+      ? Number((rawId as Record<string, unknown>)["#text"])
+      : Number(rawId);
 
   if (!CI_IDS.has(eventId)) return null;
 
   // TimeCreated/@SystemTime
   const tc = sys.TimeCreated as Record<string, unknown> | undefined;
-  const timeCreated = tc ? (String(tc["SystemTime"] ?? "")) || null : null;
+  const tcAttrs = tc?.["#attributes"] as Record<string, unknown> | undefined;
+  const timeCreated = tcAttrs?.SystemTime ? String(tcAttrs.SystemTime) : null;
 
   const machineName = sys.Computer ? String(sys.Computer) : null;
 
   // Correlation/@ActivityID
   const corr = sys.Correlation as Record<string, unknown> | undefined;
-  const rawActivity = corr?.ActivityID ?? corr?.["ActivityID"] ?? null;
+  const corrAttrs = corr?.["#attributes"] as Record<string, unknown> | undefined;
+  const rawActivity = corrAttrs?.ActivityID ?? null;
   const activityId = rawActivity ? String(rawActivity).toUpperCase() : null;
 
   const level = Number(sys.Level ?? 0);
 
-  // EventData/Data[] — each item has Name attr and #text content
+  // EventData/Data[] — each item has #attributes.Name and optional #text
   const fields: Record<string, string> = {};
   const ed = ev.EventData as Record<string, unknown> | undefined;
   if (ed) {
-    const dataItems = Array.isArray(ed.Data)
-      ? (ed.Data as unknown[])
-      : ed.Data != null
-      ? [ed.Data]
+    const dataRaw = ed.Data;
+    const dataItems: unknown[] = Array.isArray(dataRaw)
+      ? dataRaw
+      : dataRaw != null
+      ? [dataRaw]
       : [];
+
     for (const d of dataItems) {
-      if (d && typeof d === "object") {
-        const item = d as Record<string, unknown>;
-        const name = item["Name"];
-        if (name != null) {
-          const raw = item["#text"];
-          const str = raw != null ? String(raw) : "";
-          // fixGarbledUtf16 corrects byte-swapped WString values produced by
-          // the @ts-evtx/core renderXml() bug (affects CI 3089 string fields)
-          fields[String(name)] = fixGarbledUtf16(str);
-        }
-      }
+      if (!d || typeof d !== "object") continue;
+      const item = d as Record<string, unknown>;
+      const attrs = item["#attributes"] as Record<string, unknown> | undefined;
+      const name = attrs?.Name;
+      if (name == null) continue;
+      const raw = item["#text"];
+      fields[String(name)] = raw != null ? String(raw) : "";
     }
   }
 
@@ -150,51 +119,67 @@ function xmlToNamedRecord(xmlStr: string): NamedRecord | null {
   };
 }
 
-// Minimal types for EvtxFile / Record from @ts-evtx/core.
-// Defined locally so we can load the module via new Function() — required
-// because @ts-evtx/core is ESM-only and the server compiles to CommonJS.
-// TypeScript compiles dynamic import() to require() in CJS mode; wrapping
-// in new Function() keeps the raw import() expression intact in emitted JS.
-interface EvtxRecord {
-  renderXml(): string;
-}
-interface EvtxFileHandle {
-  records(): Generator<EvtxRecord>;
-}
-interface EvtxFileClass {
-  open(filePath: string): Promise<EvtxFileHandle>;
-}
-const loadEsm = new Function("m", "return import(m)") as
-  (m: string) => Promise<{ EvtxFile: EvtxFileClass }>;
-
 /**
  * Parse an EVTX binary buffer and return a JSON string in the named-field
  * format consumed by parseEvtxJson().
+ *
+ * Spawns evtx_dump, writes the buffer to its stdin, and collects the JSONL
+ * output. Resolves even if some records are unreadable (they are skipped).
  */
 export async function evtxBufferToNamedFieldJson(buffer: Buffer): Promise<string> {
-  const stamp = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  const tmpEvtx = path.join(os.tmpdir(), `evtx-${stamp}.evtx`);
-
-  try {
-    await fs.writeFile(tmpEvtx, buffer);
-
-    const { EvtxFile } = await loadEsm("@ts-evtx/core");
-    const file = await EvtxFile.open(tmpEvtx);
+  return new Promise((resolve, reject) => {
+    const proc = spawn(EVTX_DUMP, ["-o", "jsonl", "-"], {
+      stdio: ["pipe", "pipe", "pipe"],
+    });
 
     const records: NamedRecord[] = [];
+    let stderrBuf = "";
+    let lineBuf = "";
 
-    for (const record of file.records()) {
-      try {
-        const xml = record.renderXml();
-        const named = xmlToNamedRecord(xml);
-        if (named) records.push(named);
-      } catch {
-        // skip unreadable records
+    proc.stderr.on("data", (chunk: Buffer) => {
+      stderrBuf += chunk.toString();
+    });
+
+    proc.stdout.on("data", (chunk: Buffer) => {
+      lineBuf += chunk.toString("utf8");
+      const lines = lineBuf.split("\n");
+      lineBuf = lines.pop() ?? "";
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        const record = parseJsonlLine(trimmed);
+        if (record) records.push(record);
       }
-    }
+    });
 
-    return JSON.stringify(records);
-  } finally {
-    await fs.unlink(tmpEvtx).catch(() => {});
-  }
+    proc.on("close", (code) => {
+      // Flush any remaining partial line
+      if (lineBuf.trim()) {
+        const record = parseJsonlLine(lineBuf.trim());
+        if (record) records.push(record);
+      }
+      // Treat non-zero exit as an error only if we got nothing at all
+      if (code !== 0 && records.length === 0) {
+        reject(
+          new Error(
+            `evtx_dump exited with code ${code}: ${stderrBuf.trim()}. ` +
+            "Ensure evtx_dump is installed (cargo install evtx) and the file is a valid EVTX."
+          )
+        );
+        return;
+      }
+      resolve(JSON.stringify(records));
+    });
+
+    proc.on("error", (err: NodeJS.ErrnoException) => {
+      const hint =
+        err.code === "ENOENT"
+          ? " — install evtx_dump with: cargo install evtx"
+          : "";
+      reject(new Error(`Failed to spawn evtx_dump: ${err.message}${hint}`));
+    });
+
+    // Pipe the EVTX buffer into evtx_dump's stdin
+    proc.stdin.end(buffer);
+  });
 }

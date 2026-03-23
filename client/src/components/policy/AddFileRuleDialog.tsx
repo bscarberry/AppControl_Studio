@@ -146,6 +146,7 @@ export function AddFileRuleDialog({ policy, onCommit, onClose }: Props) {
 
   // ---- path fields ----
   const [filePath, setFilePath] = useState("");
+  const [isFolder, setIsFolder] = useState(false);
   const [pathMinVer, setPathMinVer] = useState("");
   const [pathMaxVer, setPathMaxVer] = useState("");
 
@@ -231,11 +232,17 @@ export function AddFileRuleDialog({ policy, onCommit, onClose }: Props) {
       };
     }
     if (kind === "path") {
+      // Auto-append \* for folder rules if the path doesn't already end with a wildcard
+      let resolvedPath = filePath.trim();
+      if (isFolder && !resolvedPath.endsWith("*")) {
+        resolvedPath = resolvedPath.replace(/\\$/, "") + "\\*";
+      }
       return {
         ...base,
         kind: "path",
         effect,
-        filePath: filePath.trim(),
+        filePath: resolvedPath,
+        isFolder,
         minimumFileVersion: pathMinVer.trim() || undefined,
         maximumFileVersion: pathMaxVer.trim() || undefined,
       };
@@ -429,17 +436,46 @@ export function AddFileRuleDialog({ policy, onCommit, onClose }: Props) {
           {kind === "path" && (
             <div className="space-y-3">
               <p className="text-xs font-semibold text-text-secondary uppercase tracking-wider">Path Details</p>
+
+              {/* File vs Folder toggle */}
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsFolder(false)}
+                  className={clsx(
+                    "flex-1 px-3 py-2 text-xs rounded border transition-all text-center",
+                    !isFolder ? "border-accent-blue bg-accent-blue/15 text-text-primary font-semibold" : "border-border text-text-muted hover:border-border-strong"
+                  )}
+                >
+                  File Path
+                  <div className="mt-0.5 text-[10px] opacity-70">Single file or pattern</div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsFolder(true)}
+                  className={clsx(
+                    "flex-1 px-3 py-2 text-xs rounded border transition-all text-center",
+                    isFolder ? "border-accent-blue bg-accent-blue/15 text-text-primary font-semibold" : "border-border text-text-muted hover:border-border-strong"
+                  )}
+                >
+                  Folder Path
+                  <div className="mt-0.5 text-[10px] opacity-70">Directory + subdirectories</div>
+                </button>
+              </div>
+
               <div className="flex flex-col gap-1">
-                <Label htmlFor="fp">File Path</Label>
+                <Label htmlFor="fp">{isFolder ? "Folder Path" : "File Path"}</Label>
                 <TextInput
                   id="fp"
                   value={filePath}
                   onChange={setFilePath}
-                  placeholder="%WINDIR%\System32\* or C:\MyApps\tool.exe"
+                  placeholder={isFolder ? "%PROGRAMFILES%\\MyApp" : "%WINDIR%\\System32\\tool.exe"}
                   required
                 />
                 <p className="text-xs text-text-muted">
-                  Supports WDAC macros (%WINDIR%, %OSDRIVE%, %PROGRAMFILES%, etc.) and wildcards (* = any sequence, ? = any single character).
+                  {isFolder
+                    ? "Enter the directory path. A \\* wildcard will be appended automatically to cover all files in the folder and subfolders."
+                    : "Supports WDAC macros (%WINDIR%, %OSDRIVE%, %PROGRAMFILES%, etc.) and wildcards (* = any sequence, ? = any single character)."}
                 </p>
                 <FieldError msg={pathErr} />
               </div>

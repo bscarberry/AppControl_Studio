@@ -7,6 +7,7 @@ import type {
   ParsePolicyResponse,
   GeneratePolicyResponse,
   ComparePoliciesResponse,
+  MergePoliciesResponse,
   SemanticComparePoliciesResponse,
   EventImportResult,
   ExplainPolicyResponse,
@@ -14,6 +15,8 @@ import type {
   CreatePolicyFromEventsResponse,
   ProposeRulesResponse,
   HuntingIngestApiResponse,
+  CertInfoResponse,
+  ConvertAppLockerResponse,
   SecurityStatus,
   SecurityAuditResponse,
   SimulateBinaryResponse,
@@ -99,6 +102,18 @@ export const policyApi = {
 
   simulate: (binary: BinaryMetadata, policy: WdacPolicy) =>
     post<SimulateBinaryResponse>("/policy/simulate", { binary, policy }),
+
+  /** Merge 2–15 policies into one (WDAC Wizard parity) */
+  merge: (xmlFiles: string[], friendlyName?: string) =>
+    post<MergePoliciesResponse>("/policy/merge", { xmlFiles, friendlyName }),
+
+  /** Extract publisher metadata from a .cer/.crt/.pem certificate file */
+  certInfo: (certBase64: string, fileName?: string) =>
+    post<CertInfoResponse>("/policy/cert-info", { certBase64, fileName }),
+
+  /** Convert an AppLocker XML policy to WDAC rules */
+  convertAppLocker: (appLockerXml: string, includeDenyRules = false) =>
+    post<ConvertAppLockerResponse>("/policy/convert-applocker", { appLockerXml, includeDenyRules }),
 };
 
 // ---------------------------------------------------------------------------

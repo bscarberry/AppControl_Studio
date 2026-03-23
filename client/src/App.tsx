@@ -7,6 +7,8 @@ import { ExportPage } from "./pages/ExportPage.tsx";
 import { RuleEnginePage } from "./pages/RuleEnginePage.tsx";
 import { SecurityPage } from "./pages/SecurityPage.tsx";
 import { SimulatorPage } from "./pages/SimulatorPage.tsx";
+import { MergePage } from "./pages/MergePage.tsx";
+import { AppLockerPage } from "./pages/AppLockerPage.tsx";
 
 export default function App() {
   return (
@@ -22,6 +24,8 @@ export default function App() {
             <Route path="/rule-engine" element={<RuleEnginePage />} />
             <Route path="/security" element={<SecurityPage />} />
             <Route path="/simulator" element={<SimulatorPage />} />
+            <Route path="/merge" element={<MergePage />} />
+            <Route path="/applocker" element={<AppLockerPage />} />
           </Routes>
         </main>
       </div>

@@ -164,9 +164,9 @@ export interface ParsedCiEvent {
     issuerName?: string;
     notValidAfter?: string;
     notValidBefore?: string;
-    /** TBS hash of the publisher/leaf certificate — used as CertRoot in WDAC signer rules */
+    /** TBS hash of the publisher/leaf certificate */
     publisherTbsHash?: string;
-    /** TBS hash of the issuer certificate */
+    /** TBS hash of the issuer/root CA certificate — used as CertRoot in WDAC signer rules */
     issuerTbsHash?: string;
     /** Total number of signatures on the file (from 3089.TotalSignatureCount) */
     totalSignatureCount?: number;

@@ -14,6 +14,8 @@ import {
   ChevronRight,
   LogOut,
   User,
+  Merge,
+  ArrowRightLeft,
 } from "lucide-react";
 import clsx from "clsx";
 import { useAppStore } from "../../store/index.ts";
@@ -69,6 +71,18 @@ const navItems: NavItem[] = [
     label: "Security",
     icon: <Lock size={16} />,
     description: "Posture, RBAC, audit log",
+  },
+  {
+    to: "/merge",
+    label: "Merge Policies",
+    icon: <Merge size={16} />,
+    description: "Combine up to 15 policies into one",
+  },
+  {
+    to: "/applocker",
+    label: "AppLocker Convert",
+    icon: <ArrowRightLeft size={16} />,
+    description: "Convert AppLocker XML to WDAC",
   },
 ];
 
