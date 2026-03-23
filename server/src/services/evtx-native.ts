@@ -22,7 +22,7 @@ import { spawn } from "child_process";
 // Override: set EVTX_DUMP_PATH env var.
 import path from "path";
 const EVTX_DUMP = process.env.EVTX_DUMP_PATH
-  ?? path.join(__dirname, "..", "bin", "evtx_dump");
+  ?? path.join(__dirname, "..", "..", "bin", "evtx_dump");
 
 // CodeIntegrity event IDs we care about
 const CI_IDS = new Set([
