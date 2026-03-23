@@ -77,7 +77,7 @@ eventsRouter.post("/hunting/parse", (req: Request, res: Response) => {
 });
 
 // ---------------------------------------------------------------------------
-// Parse native EVTX binary — cross-platform via @ts-evtx/core
+// Parse native EVTX binary — via evtx_dump (cargo install evtx)
 // ---------------------------------------------------------------------------
 eventsRouter.post("/parse-evtx", upload.single("file"), async (req: Request, res: Response) => {
   if (!req.file) {
