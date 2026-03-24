@@ -33,6 +33,70 @@ const CI_IDS = new Set([
   3111, 3114,
 ]);
 
+/**
+ * Known positional field layouts for CodeIntegrity events.
+ * Used as a fallback when evtx_dump outputs Data items without a Name attribute.
+ * Positions that are numeric/binary-only fields not needed for rule building are
+ * omitted (they are not extracted by parseNamedRecord anyway).
+ */
+const CI_POSITIONAL_FIELDS: Record<number, string[]> = {
+  // 3033, 3034, 3036 — kernel-mode enforcement/audit/scan
+  3033: ["FileNameBuffer", "Status", "PolicyGuid"],
+  3034: ["FileNameBuffer", "Status", "PolicyGuid"],
+  3036: ["FileNameBuffer", "Status", "PolicyGuid"],
+  // 3064, 3065 — boot-policy audit/block
+  3064: ["FileNameBuffer", "ProcessNameBuffer", "RequestedPolicy", "ValidatedPolicy", "Status",
+         "Sha1FlatHash", "Sha256FlatHash", "Sha1PageHash", "Sha256PageHash",
+         "Flags", "PolicyName", "PolicyGuid", "UserWriteable",
+         "OriginalFilename", "InternalName", "FileDescription", "ProductName",
+         "FileVersion", "PackageFamilyName"],
+  3065: ["FileNameBuffer", "ProcessNameBuffer", "RequestedPolicy", "ValidatedPolicy", "Status",
+         "Sha1FlatHash", "Sha256FlatHash", "Sha1PageHash", "Sha256PageHash",
+         "Flags", "PolicyName", "PolicyGuid", "UserWriteable",
+         "OriginalFilename", "InternalName", "FileDescription", "ProductName",
+         "FileVersion", "PackageFamilyName"],
+  // 3076, 3077 — user-mode audit/block
+  3076: ["FileNameBuffer", "ProcessNameBuffer", "RequestedPolicy", "ValidatedPolicy", "Status",
+         "Sha1FlatHash", "Sha256FlatHash", "Sha1PageHash", "Sha256PageHash",
+         "Flags", "PolicyName", "PolicyGuid", "UserWriteable",
+         "OriginalFilename", "InternalName", "FileDescription", "ProductName",
+         "FileVersion", "PackageFamilyName"],
+  3077: ["FileNameBuffer", "ProcessNameBuffer", "RequestedPolicy", "ValidatedPolicy", "Status",
+         "Sha1FlatHash", "Sha256FlatHash", "Sha1PageHash", "Sha256PageHash",
+         "Flags", "PolicyName", "PolicyGuid", "UserWriteable",
+         "OriginalFilename", "InternalName", "FileDescription", "ProductName",
+         "FileVersion", "PackageFamilyName"],
+  // 3079, 3080, 3082 — script/MSI audit/block
+  3079: ["FileNameBuffer", "ProcessNameBuffer", "RequestedPolicy", "ValidatedPolicy", "Status",
+         "Sha1FlatHash", "Sha256FlatHash", "Sha1PageHash", "Sha256PageHash",
+         "Flags", "PolicyName", "PolicyGuid"],
+  3080: ["FileNameBuffer", "ProcessNameBuffer", "RequestedPolicy", "ValidatedPolicy", "Status",
+         "Sha1FlatHash", "Sha256FlatHash", "Sha1PageHash", "Sha256PageHash",
+         "Flags", "PolicyName", "PolicyGuid"],
+  3082: ["FileNameBuffer", "ProcessNameBuffer", "RequestedPolicy", "ValidatedPolicy", "Status",
+         "Sha1FlatHash", "Sha256FlatHash", "Sha1PageHash", "Sha256PageHash",
+         "Flags", "PolicyName", "PolicyGuid"],
+  // 3089 — signature information (correlated with parent events)
+  3089: ["FileNameBuffer", "PolicyGuid", "TotalSignatureCount", "SignatureIndex",
+         "SignatureType", "ValidatedSigningLevel", "VerificationError", "Flags",
+         "PolicyBits", "NotValidBefore", "NotValidAfter",
+         "PublisherName", "IssuerName", "PublisherTBSHash", "IssuerTBSHash",
+         "OriginalFilename", "InternalName", "FileDescription", "ProductName",
+         "FileVersion"],
+  // 3091, 3092
+  3091: ["FileNameBuffer", "ProcessNameBuffer", "RequestedPolicy", "ValidatedPolicy", "Status",
+         "Sha1FlatHash", "Sha256FlatHash", "PolicyName"],
+  3092: ["FileNameBuffer", "ProcessNameBuffer", "RequestedPolicy", "ValidatedPolicy", "Status",
+         "Sha1FlatHash", "Sha256FlatHash", "PolicyName"],
+  // 3111, 3114
+  3111: ["FileNameBuffer", "ProcessNameBuffer", "RequestedPolicy", "ValidatedPolicy", "Status",
+         "Sha1FlatHash", "Sha256FlatHash", "Sha1PageHash", "Sha256PageHash",
+         "Flags", "PolicyName", "PolicyGuid"],
+  3114: ["FileNameBuffer", "ProcessNameBuffer", "RequestedPolicy", "ValidatedPolicy", "Status",
+         "Sha1FlatHash", "Sha256FlatHash", "Sha1PageHash", "Sha256PageHash",
+         "Flags", "PolicyName", "PolicyGuid"],
+};
+
 interface NamedRecord {
   EventId: number;
   TimeCreated: string | null;
@@ -91,7 +155,9 @@ function parseJsonlLine(line: string): NamedRecord | null {
 
   const level = Number(sys.Level ?? 0);
 
-  // EventData/Data[] — each item has #attributes.Name and optional #text
+  // EventData/Data[] — each item has #attributes.Name and optional #text.
+  // Some EVTX files (or evtx_dump versions) emit Data items without a Name
+  // attribute (positional format).  Fall back to the known field layout table.
   const fields: Record<string, string> = {};
   const ed = ev.EventData as Record<string, unknown> | undefined;
   if (ed) {
@@ -102,15 +168,39 @@ function parseJsonlLine(line: string): NamedRecord | null {
       ? [dataRaw]
       : [];
 
-    for (const d of dataItems) {
-      if (!d || typeof d !== "object") continue;
+    const positionalLayout = CI_POSITIONAL_FIELDS[eventId] ?? [];
+    let hasNamedFields = false;
+
+    for (let i = 0; i < dataItems.length; i++) {
+      const d = dataItems[i];
+      if (!d || typeof d !== "object") {
+        // Plain string value — positional
+        if (d != null && positionalLayout[i]) {
+          fields[positionalLayout[i]] = String(d);
+        }
+        continue;
+      }
       const item = d as Record<string, unknown>;
       const attrs = item["#attributes"] as Record<string, unknown> | undefined;
       const name = attrs?.Name;
-      if (name == null) continue;
+      if (name == null) {
+        // Object without Name — positional
+        const raw = item["#text"];
+        if (raw != null && positionalLayout[i]) {
+          fields[positionalLayout[i]] = String(raw);
+        }
+        continue;
+      }
+      // Named field
+      hasNamedFields = true;
       const raw = item["#text"];
       fields[String(name)] = raw != null ? String(raw) : "";
     }
+
+    // If every item was named but none matched any expected CI field name,
+    // the layout might use different casing.  No additional action needed —
+    // parseNamedRecord already tries multiple name variants.
+    void hasNamedFields; // suppress unused-var lint
   }
 
   return {
