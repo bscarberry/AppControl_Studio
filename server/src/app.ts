@@ -102,6 +102,25 @@ const app = express();
   app.use(express.text({ limit: "50mb" }));
 
   // ---------------------------------------------------------------------------
+  // Unauthenticated debug endpoint — returns raw evtx_dump JSONL records
+  // TEMPORARY: remove once parsing issues are diagnosed
+  // ---------------------------------------------------------------------------
+  {
+    const multer = (await import("multer")).default;
+    const { evtxBufferToNamedFieldJson } = await import("./services/evtx-native.js");
+    const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
+    app.post("/debug-evtx-raw", upload.single("file"), async (req, res) => {
+      if (!req.file) { res.status(400).json({ error: "No file" }); return; }
+      try {
+        const json = await evtxBufferToNamedFieldJson(req.file.buffer);
+        res.json({ raw: JSON.parse(json) });
+      } catch (err) {
+        res.status(500).json({ error: (err as Error).message });
+      }
+    });
+  }
+
+  // ---------------------------------------------------------------------------
   // Authentication — applied to all /api/* routes
   //
   // 1. MSAL JWT middleware: validates Azure AD tokens when MSAL_TENANT_ID and
