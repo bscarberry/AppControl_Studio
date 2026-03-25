@@ -96,22 +96,3 @@ eventsRouter.post("/parse-evtx", upload.single("file"), async (req: Request, res
     });
   }
 });
-
-// ---------------------------------------------------------------------------
-// Debug: return raw evtx_dump JSONL output (intermediate named records)
-// ---------------------------------------------------------------------------
-eventsRouter.post("/debug-evtx-raw", upload.single("file"), async (req: Request, res: Response) => {
-  if (!req.file) {
-    res.status(400).json({ ok: false, error: { code: "VALIDATION", message: "No file provided." } });
-    return;
-  }
-  try {
-    const json = await evtxBufferToNamedFieldJson(req.file.buffer);
-    res.json({ ok: true, raw: JSON.parse(json) });
-  } catch (err) {
-    res.status(422).json({
-      ok: false,
-      error: { code: "PARSE_ERROR", message: (err as Error).message },
-    });
-  }
-});
