@@ -7,6 +7,7 @@ on:
   push:
     branches:
       - claude/wdac-policy-management-app-L2eDm
+      - claude/add-policy-id-events-HKAc6
   workflow_dispatch:
 
 jobs:
