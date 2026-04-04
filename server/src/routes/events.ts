@@ -6,7 +6,7 @@ import {
   parseAdvancedHuntingJson,
   parseAdvancedHuntingCsv,
 } from "../services/event-parser.js";
-import { evtxBufferToNamedFieldJson, evtxDumpRaw } from "../services/evtx-native.js";
+import { evtxBufferToNamedFieldJson } from "../services/evtx-native.js";
 
 export const eventsRouter = Router();
 
@@ -97,22 +97,3 @@ eventsRouter.post("/parse-evtx", upload.single("file"), async (req: Request, res
   }
 });
 
-// ---------------------------------------------------------------------------
-// DEBUG — raw evtx_dump output (temporary diagnostic endpoint, unauthenticated)
-// Returns the first 20 raw JSONL lines from evtx_dump for a given EVTX file.
-// ---------------------------------------------------------------------------
-eventsRouter.post("/debug-evtx-raw", upload.single("file"), async (req: Request, res: Response) => {
-  if (!req.file) {
-    res.status(400).json({ ok: false, error: "No file provided." });
-    return;
-  }
-  try {
-    const lines = await evtxDumpRaw(req.file.buffer, 20);
-    const parsed = lines.map((l) => {
-      try { return JSON.parse(l); } catch { return l; }
-    });
-    res.json({ ok: true, lineCount: lines.length, lines: parsed });
-  } catch (err) {
-    res.status(422).json({ ok: false, error: (err as Error).message });
-  }
-});
