@@ -25,6 +25,8 @@ import { createRbacMiddleware } from "./middleware/rbac.js";
 import { createMsalAuthMiddleware, isMsalAuthEnabled } from "./middleware/msal-auth.js";
 import { loadSecurityConfig } from "./config/security-config.js";
 import { initAuditLogger, getAuditLogger } from "./services/audit-logger.js";
+import { evtxDumpRaw } from "./services/evtx-native.js";
+import multer from "multer";
 
 const PORT = parseInt(process.env.PORT ?? "3001", 10);
 const MAX_BODY = 50 * 1024 * 1024; // 50 MB
@@ -100,6 +102,23 @@ const app = express();
   app.use(requestSizeGuard(MAX_BODY));
   app.use(express.json({ limit: "50mb" }));
   app.use(express.text({ limit: "50mb" }));
+
+  // ---------------------------------------------------------------------------
+  // DEBUG (unauthenticated) — raw evtx_dump output for diagnosis
+  // Mounted before auth middleware so it can be called without a bearer token.
+  // ---------------------------------------------------------------------------
+
+  const debugUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
+  app.post("/debug-evtx-raw", debugUpload.single("file"), async (req, res) => {
+    if (!req.file) { res.status(400).json({ ok: false, error: "No file" }); return; }
+    try {
+      const lines = await evtxDumpRaw(req.file.buffer, 20);
+      const parsed = lines.map((l) => { try { return JSON.parse(l); } catch { return l; } });
+      res.json({ ok: true, lineCount: lines.length, lines: parsed });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: (err as Error).message });
+    }
+  });
 
   // ---------------------------------------------------------------------------
   // Authentication — applied to all /api/* routes
