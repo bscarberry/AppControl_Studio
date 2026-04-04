@@ -155,52 +155,63 @@ function parseJsonlLine(line: string): NamedRecord | null {
 
   const level = Number(sys.Level ?? 0);
 
-  // EventData/Data[] — each item has #attributes.Name and optional #text.
-  // Some EVTX files (or evtx_dump versions) emit Data items without a Name
-  // attribute (positional format).  Fall back to the known field layout table.
+  // EventData — evtx_dump can emit this in two different shapes depending on
+  // whether it resolved the provider's WEVT template:
+  //
+  //   Shape A (flat key-value): EventData is a plain object whose keys are the
+  //     field names directly — produced when evtx_dump resolves the WEVT template.
+  //     Example: { "File Name": "\\Device\\...", "SHA256 Flat Hash": "ABC...", ... }
+  //
+  //   Shape B (Data array): EventData contains a "Data" array of
+  //     { #attributes: { Name }, #text } objects, or positional unnamed items
+  //     when the manifest is unavailable.
   const fields: Record<string, string> = {};
   const ed = ev.EventData as Record<string, unknown> | undefined;
   if (ed) {
-    const dataRaw = ed.Data;
-    const dataItems: unknown[] = Array.isArray(dataRaw)
-      ? dataRaw
-      : dataRaw != null
-      ? [dataRaw]
-      : [];
+    if ("Data" in ed) {
+      // Shape B — Data array
+      const dataRaw = ed.Data;
+      const dataItems: unknown[] = Array.isArray(dataRaw)
+        ? dataRaw
+        : dataRaw != null
+        ? [dataRaw]
+        : [];
 
-    const positionalLayout = CI_POSITIONAL_FIELDS[eventId] ?? [];
-    let hasNamedFields = false;
+      const positionalLayout = CI_POSITIONAL_FIELDS[eventId] ?? [];
 
-    for (let i = 0; i < dataItems.length; i++) {
-      const d = dataItems[i];
-      if (!d || typeof d !== "object") {
-        // Plain string value — positional
-        if (d != null && positionalLayout[i]) {
-          fields[positionalLayout[i]] = String(d);
+      for (let i = 0; i < dataItems.length; i++) {
+        const d = dataItems[i];
+        if (!d || typeof d !== "object") {
+          // Plain string/number value — positional
+          if (d != null && positionalLayout[i]) {
+            fields[positionalLayout[i]] = String(d);
+          }
+          continue;
         }
-        continue;
-      }
-      const item = d as Record<string, unknown>;
-      const attrs = item["#attributes"] as Record<string, unknown> | undefined;
-      const name = attrs?.Name;
-      if (name == null) {
-        // Object without Name — positional
+        const item = d as Record<string, unknown>;
+        const attrs = item["#attributes"] as Record<string, unknown> | undefined;
+        const name = attrs?.Name;
+        if (name == null) {
+          // Object without Name — positional
+          const raw = item["#text"];
+          if (raw != null && positionalLayout[i]) {
+            fields[positionalLayout[i]] = String(raw);
+          }
+          continue;
+        }
+        // Named field
         const raw = item["#text"];
-        if (raw != null && positionalLayout[i]) {
-          fields[positionalLayout[i]] = String(raw);
-        }
-        continue;
+        fields[String(name)] = raw != null ? String(raw) : "";
       }
-      // Named field
-      hasNamedFields = true;
-      const raw = item["#text"];
-      fields[String(name)] = raw != null ? String(raw) : "";
+    } else {
+      // Shape A — flat key-value object (evtx_dump resolved the WEVT template).
+      // Field names are already the object keys.  Skip booleans and nulls;
+      // parseNamedRecord handles type conversion for hashes etc.
+      for (const [key, val] of Object.entries(ed)) {
+        if (val == null || typeof val === "boolean") continue;
+        fields[key] = String(val);
+      }
     }
-
-    // If every item was named but none matched any expected CI field name,
-    // the layout might use different casing.  No additional action needed —
-    // parseNamedRecord already tries multiple name variants.
-    void hasNamedFields; // suppress unused-var lint
   }
 
   return {
