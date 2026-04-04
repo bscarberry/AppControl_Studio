@@ -8,6 +8,7 @@ on:
     branches:
       - claude/wdac-policy-management-app-L2eDm
       - claude/add-policy-id-events-HKAc6
+      - claude/fix-evtx-parsing-2UZXy
   workflow_dispatch:
 
 jobs:
