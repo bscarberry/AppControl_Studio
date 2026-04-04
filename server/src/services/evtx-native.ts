@@ -214,6 +214,49 @@ function parseJsonlLine(line: string): NamedRecord | null {
 }
 
 /**
+ * Return raw JSONL lines from evtx_dump for diagnostic purposes.
+ * Only lines that parse as JSON objects are included (empty/separator lines
+ * are dropped).  The first `limit` lines are returned.
+ */
+export async function evtxDumpRaw(buffer: Buffer, limit = 20): Promise<string[]> {
+  return new Promise((resolve, reject) => {
+    const proc = spawn(EVTX_DUMP, ["-o", "jsonl", "-"], {
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+
+    const lines: string[] = [];
+    let lineBuf = "";
+
+    proc.stdout.on("data", (chunk: Buffer) => {
+      if (lines.length >= limit) return;
+      lineBuf += chunk.toString("utf8");
+      const parts = lineBuf.split("\n");
+      lineBuf = parts.pop() ?? "";
+      for (const line of parts) {
+        const trimmed = line.trim();
+        if (trimmed) lines.push(trimmed);
+        if (lines.length >= limit) break;
+      }
+    });
+
+    proc.on("close", (code) => {
+      if (lineBuf.trim() && lines.length < limit) lines.push(lineBuf.trim());
+      if (code !== 0 && lines.length === 0) {
+        reject(new Error(`evtx_dump exited with code ${code}`));
+        return;
+      }
+      resolve(lines);
+    });
+
+    proc.on("error", (err: NodeJS.ErrnoException) => {
+      reject(new Error(`Failed to spawn evtx_dump: ${err.message}`));
+    });
+
+    proc.stdin.end(buffer);
+  });
+}
+
+/**
  * Parse an EVTX binary buffer and return a JSON string in the named-field
  * format consumed by parseEvtxJson().
  *
