@@ -575,35 +575,35 @@ let _fileAttribSeq = 0;
 //   FileAttrib:       ID_FILEATTRIB_F_{n}
 
 function nextSignerId(): string {
-  return `ID_SIGNER_S_${String(++_signerSeq).padStart(4, "0")}`;
+  return `ID_SIGNER_S_${++_signerSeq}`;
 }
 
 function nextHashRuleId(effect: "Allow" | "Deny"): string {
   return effect === "Allow"
-    ? `ID_ALLOW_HASH_${String(++_hashRuleSeq).padStart(4, "0")}`
-    : `ID_DENY_HASH_${String(++_hashRuleSeq).padStart(4, "0")}`;
+    ? `ID_ALLOW_HASH_${++_hashRuleSeq}`
+    : `ID_DENY_HASH_${++_hashRuleSeq}`;
 }
 
 function nextPathRuleId(effect: "Allow" | "Deny"): string {
   return effect === "Allow"
-    ? `ID_ALLOW_PATH_${String(++_pathRuleSeq).padStart(4, "0")}`
-    : `ID_DENY_PATH_${String(++_pathRuleSeq).padStart(4, "0")}`;
+    ? `ID_ALLOW_PATH_${++_pathRuleSeq}`
+    : `ID_DENY_PATH_${++_pathRuleSeq}`;
 }
 
 function nextAttribRuleId(effect: "Allow" | "Deny"): string {
   return effect === "Allow"
-    ? `ID_ALLOW_A_${String(++_attribRuleSeq).padStart(4, "0")}`
-    : `ID_DENY_D_${String(++_attribRuleSeq).padStart(4, "0")}`;
+    ? `ID_ALLOW_A_${++_attribRuleSeq}`
+    : `ID_DENY_D_${++_attribRuleSeq}`;
 }
 
 function nextPfnRuleId(effect: "Allow" | "Deny"): string {
   return effect === "Allow"
-    ? `ID_ALLOW_PFN_${String(++_pfnRuleSeq).padStart(4, "0")}`
-    : `ID_DENY_PFN_${String(++_pfnRuleSeq).padStart(4, "0")}`;
+    ? `ID_ALLOW_PFN_${++_pfnRuleSeq}`
+    : `ID_DENY_PFN_${++_pfnRuleSeq}`;
 }
 
 function nextFileAttribId(): string {
-  return `ID_FILEATTRIB_F_${String(++_fileAttribSeq).padStart(4, "0")}`;
+  return `ID_FILEATTRIB_F_${++_fileAttribSeq}`;
 }
 
 function buildSignerProposal(

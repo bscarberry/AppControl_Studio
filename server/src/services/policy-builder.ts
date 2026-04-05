@@ -248,7 +248,7 @@ export function buildPolicyFromEvents(
       // Signer IDs use WDAC Wizard format: ID_SIGNER_A_<0-based-counter>
       const fp = best.signerInfo.issuerTbsHash;
       if (!signerFpMap.has(fp)) {
-        const signerId = `ID_SIGNER_A_${String(signers.length).padStart(4, "0")}`;
+        const signerId = `ID_SIGNER_A_${signers.length}`;
         signerFpMap.set(fp, signerId);
 
         // Name matches WDAC Wizard: "Allow CN = <leaf CN> issued by <issuer name>"
@@ -284,7 +284,7 @@ export function buildPolicyFromEvents(
       const fn = best.originalFileName.toLowerCase();
       if (!seenFileNames.has(fn)) {
         seenFileNames.add(fn);
-        const ruleId = `ID_ALLOW_ATTR_${String(fileRules.length + 1).padStart(4, "0")}`;
+        const ruleId = `ID_ALLOW_ATTR_${fileRules.length + 1}`;
         fileRules.push({
           kind: "attribute",
           id: ruleId,
@@ -309,7 +309,7 @@ export function buildPolicyFromEvents(
 
       if (sha1 && !seenHashes.has(sha1)) {
         seenHashes.add(sha1);
-        const seqTag = String(fileRules.length + 1).padStart(4, "0");
+        const seqTag = fileRules.length + 1;
         const ruleId = `ID_ALLOW_${seqTag}_SHA1`;
         fileRules.push({
           kind: "hash",
@@ -329,7 +329,7 @@ export function buildPolicyFromEvents(
 
       if (sha256 && !seenHashes.has(sha256)) {
         seenHashes.add(sha256);
-        const seqTag = String(fileRules.length + 1).padStart(4, "0");
+        const seqTag = fileRules.length + 1;
         const ruleId = `ID_ALLOW_${seqTag}_SHA256`;
         fileRules.push({
           kind: "hash",
@@ -353,7 +353,7 @@ export function buildPolicyFromEvents(
           const normalized = best.filePath.toLowerCase();
           if (!normalized.includes("temp") && !normalized.includes("downloads")) {
             seenPaths.add(best.filePath);
-            const ruleId = `ID_ALLOW_PATH_${String(fileRules.length + 1).padStart(4, "0")}`;
+            const ruleId = `ID_ALLOW_PATH_${fileRules.length + 1}`;
             fileRules.push({
               kind: "path",
               id: ruleId,
@@ -376,7 +376,7 @@ export function buildPolicyFromEvents(
         const normalized = best.filePath.toLowerCase();
         if (!normalized.includes("temp") && !normalized.includes("downloads")) {
           seenPaths.add(best.filePath);
-          const ruleId = `ID_ALLOW_PATH_${String(fileRules.length + 1).padStart(4, "0")}`;
+          const ruleId = `ID_ALLOW_PATH_${fileRules.length + 1}`;
           fileRules.push({
             kind: "path",
             id: ruleId,
