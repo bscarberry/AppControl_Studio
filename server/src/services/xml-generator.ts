@@ -50,26 +50,47 @@ export function generateWdacXml(policy: WdacPolicy): string {
 
   lines.push('<?xml version="1.0" encoding="utf-8"?>');
 
-  // Root element — namespaces + PolicyType on a single line (matches cipolicy schema)
+  const isSinglePolicy = policy.policyFormat === "SinglePolicy";
+
+  // Root element. Multiple-policy format (default) carries the PolicyType
+  // attribute; the legacy single-policy format does not.
   const policyTypeAttr =
     policy.policyType === "Supplemental" ? "Supplemental Policy" : "Base Policy";
+  const friendlyNameAttr = policy.friendlyName
+    ? ` FriendlyName="${escapeXml(policy.friendlyName)}"` : "";
   lines.push(
     `<SiPolicy` +
     ` xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"` +
     ` xmlns:xsd="http://www.w3.org/2001/XMLSchema"` +
-    ` PolicyType="${policyTypeAttr}"` +
+    friendlyNameAttr +
+    (isSinglePolicy ? "" : ` PolicyType="${policyTypeAttr}"`) +
     ` xmlns="urn:schemas-microsoft-com:sipolicy">`
   );
 
-  // VersionEx, PlatformID, PolicyID, BasePolicyID — child elements (not attributes)
+  // Header elements. Schema order (cipolicy.xsd / AppControl Manager):
+  //   VersionEx, [PolicyTypeID | PolicyID + BasePolicyID], PlatformID
   lines.push(`${indent(1)}<VersionEx>${escapeXml(policy.versionEx)}</VersionEx>`);
-  if (policy.platformId) {
-    lines.push(`${indent(1)}<PlatformID>{${escapeXml(policy.platformId)}}</PlatformID>`);
+  if (isSinglePolicy) {
+    // Legacy single-policy format uses the fixed reserved PolicyTypeID and
+    // has no PolicyID / BasePolicyID elements.
+    const policyTypeId = policy.policyTypeId ?? "A244370E-44C9-4C06-B551-F6016E563076";
+    lines.push(`${indent(1)}<PolicyTypeID>{${escapeXml(policyTypeId)}}</PolicyTypeID>`);
+  } else {
+    if (policy.policyType === "Supplemental" && !policy.basePolicyId) {
+      throw new Error(
+        "Supplemental policies must reference a base policy: basePolicyId is required."
+      );
+    }
+    // Multiple-policy format requires both PolicyID and BasePolicyID; base
+    // policies use a self-referential BasePolicyID (BasePolicyID == PolicyID).
+    const basePolicyId = policy.basePolicyId ?? policy.policyId;
+    lines.push(`${indent(1)}<PolicyID>{${escapeXml(policy.policyId)}}</PolicyID>`);
+    lines.push(`${indent(1)}<BasePolicyID>{${escapeXml(basePolicyId)}}</BasePolicyID>`);
   }
-  lines.push(`${indent(1)}<PolicyID>{${escapeXml(policy.policyId)}}</PolicyID>`);
-  if (policy.basePolicyId) {
-    lines.push(`${indent(1)}<BasePolicyID>{${escapeXml(policy.basePolicyId)}}</BasePolicyID>`);
-  }
+  // PlatformID is REQUIRED by cipolicy.xsd (minOccurs=1) — default to the
+  // standard Windows platform GUID when the model doesn't carry one.
+  const platformId = policy.platformId ?? "2E07F7E4-194C-4D20-B7C9-6F44A6C5A234";
+  lines.push(`${indent(1)}<PlatformID>{${escapeXml(platformId)}}</PlatformID>`);
 
   // Rules
   lines.push(`${indent(1)}<Rules>`);
@@ -135,18 +156,31 @@ export function generateWdacXml(policy: WdacPolicy): string {
   lines.push(`${indent(1)}<HvciOptions>${policy.hvciOptions ?? 0}</HvciOptions>`);
 
   // Settings — PolicyInfo Name and Id
-  const policyLabel = escapeXml(policy.friendlyName ?? policy.policyId);
+  const settingValues: Array<[string, string]> = [
+    ["Name", policy.friendlyName ?? policy.policyId],
+    ["Id", policy.settingsId ?? policy.friendlyName ?? policy.policyId],
+  ];
   lines.push(`${indent(1)}<Settings>`);
-  for (const valueName of ["Name", "Id"] as const) {
+  for (const [valueName, value] of settingValues) {
     lines.push(
       `${indent(2)}<Setting Provider="PolicyInfo" Key="Information" ValueName="${valueName}">`
     );
     lines.push(`${indent(3)}<Value>`);
-    lines.push(`${indent(4)}<String>${policyLabel}</String>`);
+    lines.push(`${indent(4)}<String>${escapeXml(value)}</String>`);
     lines.push(`${indent(3)}</Value>`);
     lines.push(`${indent(2)}</Setting>`);
   }
   lines.push(`${indent(1)}</Settings>`);
+
+  // SupplementalPolicySigners — signers authorized to sign supplemental
+  // policies for this base policy. Emitted after Settings (schema order).
+  if (policy.supplementalPolicySigners && policy.supplementalPolicySigners.length > 0) {
+    lines.push(`${indent(1)}<SupplementalPolicySigners>`);
+    for (const signerId of policy.supplementalPolicySigners) {
+      lines.push(`${indent(2)}<SupplementalPolicySigner SignerId="${escapeXml(signerId)}" />`);
+    }
+    lines.push(`${indent(1)}</SupplementalPolicySigners>`);
+  }
 
   lines.push(`</SiPolicy>`);
 
@@ -190,10 +224,14 @@ function serializeFileRule(rule: WdacFileRule): string {
       const r = rule as WdacHashRule;
       // Note: cipolicy.xsd <Allow>/<Deny> elements have no HashType attribute.
       // hashType is an internal model discriminator only — do not emit it.
+      // FileName is likewise informational-only on hash rules: Microsoft
+      // tooling emits hash rules with ID + FriendlyName + Hash only, so the
+      // filename is folded into FriendlyName instead of emitted as an
+      // attribute (which would add a second match constraint).
+      const friendly = r.friendlyName ?? r.fileName;
       const attrs = [
         `ID="${escapeXml(r.id)}"`,
-        ...(r.friendlyName ? [`FriendlyName="${escapeXml(r.friendlyName)}"`] : []),
-        ...(r.fileName ? [`FileName="${escapeXml(r.fileName)}"`] : []),
+        ...(friendly ? [`FriendlyName="${escapeXml(friendly)}"`] : []),
         `Hash="${escapeXml(r.hash)}"`,
       ];
       return `${I}<${r.effect} ${attrs.join(" ")} />`;
@@ -293,6 +331,19 @@ function generateSigners(signers: WdacSignerRule[]): string[] {
   return lines;
 }
 
+/**
+ * SigningScenario IDs must match the cipolicy.xsd SigningScenarioIDType
+ * pattern (ID_SIGNINGSCENARIO_[A-Z][_A-Z0-9]*). Policies written by hand or
+ * by older tooling sometimes use bare digits ("0"/"1") — normalize those to
+ * the conventional identifiers so the generated XML validates.
+ */
+function normalizeScenarioId(id: string, value: number): string {
+  if (/^ID_SIGNINGSCENARIO_[A-Z][_A-Z0-9]*$/.test(id)) return id;
+  if (value === 131) return "ID_SIGNINGSCENARIO_DRIVERS";
+  if (value === 12) return "ID_SIGNINGSCENARIO_WINDOWS";
+  return `ID_SIGNINGSCENARIO_SC_${value}`;
+}
+
 function generateSigningScenarios(
   scenarios: WdacSigningScenario[],
   friendlyName: string
@@ -305,7 +356,7 @@ function generateSigningScenarios(
     // ID, FriendlyName, Value (cipolicy schema order)
     lines.push(
       `${indent(2)}<SigningScenario` +
-      ` ID="${escapeXml(ss.id)}"` +
+      ` ID="${escapeXml(normalizeScenarioId(ss.id, ss.value))}"` +
       ` FriendlyName="${escapeXml(friendlyName)}"` +
       ` Value="${ss.value}"` +
       `${hashAttr}>`

@@ -93,7 +93,7 @@ Leave `VITE_MSAL_CLIENT_ID` and `MSAL_CLIENT_ID` unset (or empty) to disable aut
 Load a WDAC policy XML file and inspect every component through tabbed views:
 
 - **Overview** — policy identity, mode (audit/enforcement), rule counts, and an automated security risk assessment that flags dangerous option combinations
-- **Options** — toggle any of the 23 documented policy rule options (0–22) with descriptions of each
+- **Options** — toggle any of the 25 recognized policy rule options (including newer schema options like Conditional Windows Lockdown Policy) with descriptions of each
 - **File Rules** — searchable, filterable table of Allow/Deny/FileAttrib rules with type indicators (hash, path, publisher, package)
 - **Signers** — expandable signer list showing certificate root, publisher, issuer, EKU, and FileAttrib references
 - **XML Preview** — generate deployable XML and download it
@@ -199,7 +199,7 @@ All endpoints accept and return JSON. Every response is wrapped in `{ ok: true, 
 | `POST` | `/api/policy/compare` | Structural diff of two policy XML strings |
 | `POST` | `/api/policy/explain` | Human-readable analysis and risk assessment |
 | `POST` | `/api/policy/from-events` | Build a policy from parsed CodeIntegrity events |
-| `GET`  | `/api/policy/options` | List all 23 policy rule options with descriptions |
+| `GET`  | `/api/policy/options` | List all recognized policy rule options with descriptions |
 
 ### Events
 

@@ -156,8 +156,9 @@ function resolveRuleType(
   const override = ruleSelectionMap.get(file.key);
   if (override) return override;
 
-  // Legacy global toggles
-  if (preferPublisherRules && file.best.signerInfo?.publisherTbsHash) {
+  // Legacy global toggles. Publisher rules are anchored on the issuer TBS
+  // hash (CertRoot), so require it here.
+  if (preferPublisherRules && file.best.signerInfo?.issuerTbsHash) {
     return "publisher";
   }
 
@@ -229,7 +230,7 @@ export function buildPolicyFromEvents(
 
   for (const file of uniqueFiles) {
     const { best } = file;
-    const ruleType = resolveRuleType(
+    let ruleType = resolveRuleType(
       file,
       ruleSelectionMap,
       defaultRuleType,
@@ -242,24 +243,36 @@ export function buildPolicyFromEvents(
       continue;
     }
 
-    if (ruleType === "publisher" && best.signerInfo?.issuerTbsHash) {
+    // Downgrade rule types whose required event data is missing so files are
+    // never silently dropped:
+    //   publisher requires the issuer TBS hash (the CertRoot anchor);
+    //   fileAttrib requires OriginalFileName.
+    // Both fall back to a hash rule (which itself falls back to path).
+    if (ruleType === "publisher" && !best.signerInfo?.issuerTbsHash) {
+      log.push(`No issuer TBS hash for ${best.filePath} — falling back to hash rule.`);
+      ruleType = "hash";
+    }
+    if (ruleType === "fileAttrib" && !best.originalFileName) {
+      log.push(`No OriginalFileName for ${best.filePath} — falling back to hash rule.`);
+      ruleType = "hash";
+    }
+
+    if (ruleType === "publisher") {
       // Publisher rule: CertRoot (TBS of issuer/root CA) + CertPublisher (leaf CN).
       // CertRoot pins the CA chain; CertPublisher scopes to the leaf cert's CN.
       // Signer IDs use WDAC Wizard format: ID_SIGNER_A_<0-based-counter>
-      const fp = best.signerInfo.issuerTbsHash;
+      const si = best.signerInfo!;
+      const fp = si.issuerTbsHash!;
       if (!signerFpMap.has(fp)) {
         const signerId = `ID_SIGNER_A_${String(signers.length).padStart(4, "0")}`;
         signerFpMap.set(fp, signerId);
 
         // Name matches WDAC Wizard: "Allow CN = <leaf CN> issued by <issuer name>"
-        const signerName = buildSignerName(
-          best.signerInfo.publisherName,
-          best.signerInfo.issuerName
-        );
+        const signerName = buildSignerName(si.publisherName, si.issuerName);
 
         // CertPublisher value: extract CN from full subject DN if present
-        const certPublisher = best.signerInfo.publisherName
-          ? (best.signerInfo.publisherName.match(/^CN=([^,]+)/i)?.[1] ?? best.signerInfo.publisherName)
+        const certPublisher = si.publisherName
+          ? (si.publisherName.match(/^CN=([^,]+)/i)?.[1] ?? si.publisherName)
           : undefined;
 
         const signer: WdacSignerRule = {
@@ -278,10 +291,10 @@ export function buildPolicyFromEvents(
       } else {
         log.push(`Publisher rule reused for: ${best.filePath}`);
       }
-    } else if (ruleType === "fileAttrib" && best.originalFileName) {
+    } else if (ruleType === "fileAttrib") {
       // OriginalFileName-based allow rule (attribute rule)
       // More maintainable than hash rules; should be paired with publisher scoping in production
-      const fn = best.originalFileName.toLowerCase();
+      const fn = best.originalFileName!.toLowerCase();
       if (!seenFileNames.has(fn)) {
         seenFileNames.add(fn);
         const ruleId = `ID_ALLOW_ATTR_${String(fileRules.length + 1).padStart(4, "0")}`;
@@ -291,7 +304,9 @@ export function buildPolicyFromEvents(
           effect: "Allow",
           friendlyName: `Allow ${best.originalFileName} (FileName)`,
           fileName: best.originalFileName,
-          ...(best.fileVersion && { minimumFileVersion: "0.0.0.0" }),
+          // FileName-level rules require a version floor; 0.0.0.0 covers all
+          // versions (matches WDAC Wizard output for FileName rules).
+          minimumFileVersion: "0.0.0.0",
         } as WdacFileRule);
         fileRuleIds.push(ruleId);
         log.push(
@@ -299,7 +314,7 @@ export function buildPolicyFromEvents(
           (best.productName ? ` (${best.productName})` : "")
         );
       }
-    } else if (ruleType === "hash" || (ruleType === "publisher" && !best.signerInfo?.publisherTbsHash)) {
+    } else if (ruleType === "hash") {
       // Hash rules — ConvertFrom-CIPolicy generates one Allow rule per hash type.
       // When both SHA1 and SHA256 flat hashes are available, emit both (matching
       // the real cipolicy output: ID_..._SHA1 and ID_..._SHA256).
@@ -309,8 +324,10 @@ export function buildPolicyFromEvents(
 
       if (sha1 && !seenHashes.has(sha1)) {
         seenHashes.add(sha1);
+        // Allow rule IDs must match ID_ALLOW_[A-Z][_A-Z0-9]* (cipolicy.xsd);
+        // "B" marks SHA-1 rules, mirroring AppControl Manager conventions.
         const seqTag = String(fileRules.length + 1).padStart(4, "0");
-        const ruleId = `ID_ALLOW_${seqTag}_SHA1`;
+        const ruleId = `ID_ALLOW_B_${seqTag}_SHA1`;
         fileRules.push({
           kind: "hash",
           id: ruleId,
@@ -330,7 +347,7 @@ export function buildPolicyFromEvents(
       if (sha256 && !seenHashes.has(sha256)) {
         seenHashes.add(sha256);
         const seqTag = String(fileRules.length + 1).padStart(4, "0");
-        const ruleId = `ID_ALLOW_${seqTag}_SHA256`;
+        const ruleId = `ID_ALLOW_A_${seqTag}_SHA256`;
         fileRules.push({
           kind: "hash",
           id: ruleId,
@@ -403,7 +420,9 @@ export function buildPolicyFromEvents(
     {
       value: 131,
       id: "ID_SIGNINGSCENARIO_DRIVERS_1",
-      ...(isSupplemental ? {} : { minHashVersion: "65536" }),
+      // 32780 = 0x800C (CALG_SHA_256) — cipolicy.xsd caps this attribute at
+      // unsigned short, so algorithm IDs (not bit sizes) are used here.
+      ...(isSupplemental ? {} : { minHashVersion: "32780" }),
       allowedSigners: [],
       deniedSigners: [],
       fileRuleRefs: [],

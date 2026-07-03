@@ -6,11 +6,13 @@
  *
  * Supported AppLocker rule types and their WDAC equivalents:
  *
- *   FilePublisherRule  → WdacSignerRule  (PCACertificate or FilePublisher specificity)
- *                        + WdacFileAttrib when file/version scope is set
  *   FileHashRule       → WdacHashRule    (SHA-256 preferred, SHA-1 fallback)
- *   FilePathRule       → WdacPathRule    (wildcards translated to WDAC macros)
+ *   FilePathRule       → WdacPathRule    (macros translated to the WDAC set)
  *   PackagedAppRule    → WdacPackageRule (Package Family Name)
+ *   FilePublisherRule  → SKIPPED with guidance. WDAC signer rules require a
+ *                        certificate TBS hash (<CertRoot> is mandatory in
+ *                        cipolicy.xsd); AppLocker publisher conditions carry
+ *                        only the subject DN, so no valid signer can be built.
  *
  * All four AppLocker rule collection types are handled:
  *   Exe, Dll, Script, Msi → all mapped to user-mode signing scenario (12)
@@ -20,9 +22,6 @@
  *     Allow Microsoft) before deployment — standalone converted policies typically
  *     lack Windows authorization rules and can cause boot issues.
  *   - Deny rules are skipped by default (they can cause lockouts if misconfigured).
- *   - AppLocker publisher rules use a different cert chain model than WDAC; the
- *     PublisherName field maps to certPublisher (leaf CN), not CertRoot/TBS hash.
- *     Without a TBS hash, the signer rule uses Publisher-level specificity only.
  */
 
 import crypto from "crypto";
@@ -33,7 +32,6 @@ import type {
   WdacSignerRule,
   WdacSigningScenario,
   AllowedSigner,
-  WdacFileAttrib,
 } from "@appcontrol/shared";
 import { generateWdacXml } from "./xml-generator.js";
 
@@ -45,15 +43,45 @@ function shortHex(): string {
   return crypto.randomBytes(3).toString("hex").toUpperCase();
 }
 
-/** Translate AppLocker path macros to WDAC path macros */
-function translatePath(appLockerPath: string): string {
-  return appLockerPath
-    .replace(/%WINDIR%/gi, "%WINDIR%")
-    .replace(/%SYSTEM32%/gi, "%WINDIR%\\System32")
-    .replace(/%PROGRAMFILES%/gi, "%PROGRAMFILES%")
-    .replace(/%OSDRIVE%/gi, "%OSDRIVE%")
+/**
+ * Translate an AppLocker path to WDAC path rule(s).
+ *
+ * WDAC's kernel path engine only expands %OSDRIVE%, %WINDIR%, and %SYSTEM32%
+ * (see WDAC Policy Wizard Helper.cs). AppLocker's %PROGRAMFILES% has no WDAC
+ * equivalent macro and covers BOTH Program Files directories, so it expands
+ * to two %OSDRIVE%-anchored rules. %REMOVABLE% and %HOT% have no WDAC
+ * equivalent at all and yield no rules.
+ */
+function translatePath(appLockerPath: string): { paths: string[]; note?: string } {
+  const base = appLockerPath
     .replace(/\*\*/g, "*") // AppLocker uses ** for recursive; WDAC uses *
     .trim();
+
+  if (/%REMOVABLE%|%HOT%/i.test(base)) {
+    return {
+      paths: [],
+      note: "AppLocker %REMOVABLE%/%HOT% locations have no WDAC equivalent — rule skipped.",
+    };
+  }
+
+  if (/%PROGRAMFILES%/i.test(base)) {
+    return {
+      paths: [
+        base.replace(/%PROGRAMFILES%/gi, "%OSDRIVE%\\Program Files"),
+        base.replace(/%PROGRAMFILES%/gi, "%OSDRIVE%\\Program Files (x86)"),
+      ],
+      note: "%PROGRAMFILES% expanded to both Program Files directories (WDAC has no such macro).",
+    };
+  }
+
+  return {
+    paths: [
+      base
+        .replace(/%WINDIR%/gi, "%WINDIR%")
+        .replace(/%SYSTEM32%/gi, "%SYSTEM32%")
+        .replace(/%OSDRIVE%/gi, "%OSDRIVE%"),
+    ],
+  };
 }
 
 /** Coerce to array if single item */
@@ -190,35 +218,23 @@ export function convertAppLockerToWdac(
       const lowVersion = cond.BinaryVersionRange?.LowSection ?? "";
       const hasFileScope = binaryName.length > 0 && binaryName !== "*";
 
-      let fileAttribRef: string | undefined;
-
-      if (hasFileScope) {
-        // FilePublisher specificity: scope the signer to a specific file
-        const faId = `ID_FILEATTRIB_F_${shortHex()}`;
-        const fa: WdacFileAttrib = {
-          kind: "fileAttrib",
-          id: faId,
-          friendlyName: `${binaryName} - from AppLocker`,
-          fileName: binaryName,
-          minimumFileVersion: lowVersion && lowVersion !== "*" ? lowVersion : undefined,
-        };
-        fileRules.push(fa);
-        fileAttribRef = faId;
-        log.push(`  + FileAttrib ${faId} for "${binaryName}"`);
-      }
-
-      const signerId = `ID_SIGNER_S_${shortHex()}`;
-      const signer: WdacSignerRule = {
-        id: signerId,
-        name: rule.Name ?? publisherName ?? `AppLocker-Publisher-${shortHex()}`,
-        certPublisher: publisherName || undefined,
-        fileAttribRefs: fileAttribRef ? [fileAttribRef] : undefined,
-        specificity: hasFileScope ? "FilePublisher" : "Publisher",
-      };
-      signers.push(signer);
-      allowedSignerIds.push(signerId);
-      stats.publisherRules++;
-      log.push(`  + Signer ${signerId} (${signer.specificity}): "${signer.name}" publisher="${publisherName}"`);
+      // WDAC signer rules must be anchored by a certificate TBS hash
+      // (<CertRoot>) — cipolicy.xsd requires it, and CI cannot verify a trust
+      // chain from a publisher name alone. AppLocker publisher conditions
+      // carry only the subject DN, so a faithful, valid conversion is not
+      // possible. Converting to a bare FileName/ProductName allow rule would
+      // be worse: version-resource metadata is attacker-controlled on
+      // unsigned files. Fail closed and tell the user how to recreate the
+      // rule properly.
+      log.push(
+        `  SKIP publisher rule "${rule.Name ?? publisherName}": AppLocker publisher ` +
+        `conditions have no certificate TBS hash, which WDAC signer rules require ` +
+        `(CertRoot). Recreate this rule from a signed copy of the file ` +
+        `(WDAC Wizard / New-CIPolicyRule -Level Publisher) or from CodeIntegrity ` +
+        `events with 3089 signature data.` +
+        (hasFileScope ? ` (was scoped to "${binaryName}" >= ${lowVersion || "any"})` : "")
+      );
+      stats.skippedRules++;
     }
 
     // -- FileHashRule → WdacHashRule --
@@ -236,7 +252,7 @@ export function convertAppLockerToWdac(
         const hashData = (h.Data ?? "").replace(/^0x/i, "");
         if (!hashData) { stats.skippedRules++; continue; }
 
-        const ruleId = `ID_ALLOW_A_${shortHex()}`;
+        const ruleId = `${action === "deny" ? "ID_DENY" : "ID_ALLOW"}_A_${shortHex()}`;
         fileRules.push({
           kind: "hash",
           id: ruleId,
@@ -263,20 +279,24 @@ export function convertAppLockerToWdac(
       const rawPath = rule.Conditions?.FilePathCondition?.Path ?? "";
       if (!rawPath) { stats.skippedRules++; continue; }
 
-      const translatedPath = translatePath(rawPath);
-      const isFolder = rawPath.endsWith("\\*") || rawPath.endsWith("/*");
+      const { paths, note } = translatePath(rawPath);
+      if (note) log.push(`  NOTE (${rule.Name ?? rawPath}): ${note}`);
+      if (paths.length === 0) { stats.skippedRules++; continue; }
 
-      const ruleId = `ID_PATH_P_${shortHex()}`;
-      fileRules.push({
-        kind: "path",
-        id: ruleId,
-        effect: action === "deny" ? "Deny" : "Allow",
-        friendlyName: rule.Name ?? ruleId,
-        filePath: translatedPath,
-        isFolder,
-      });
-      stats.pathRules++;
-      log.push(`  + Path ${ruleId} (${isFolder ? "folder" : "file"}): "${translatedPath}"`);
+      const isFolder = rawPath.endsWith("\\*") || rawPath.endsWith("/*");
+      for (const translatedPath of paths) {
+        const ruleId = `${action === "deny" ? "ID_DENY" : "ID_ALLOW"}_P_${shortHex()}`;
+        fileRules.push({
+          kind: "path",
+          id: ruleId,
+          effect: action === "deny" ? "Deny" : "Allow",
+          friendlyName: rule.Name ?? ruleId,
+          filePath: translatedPath,
+          isFolder,
+        });
+        stats.pathRules++;
+        log.push(`  + Path ${ruleId} (${isFolder ? "folder" : "file"}): "${translatedPath}"`);
+      }
     }
 
     // -- PackagedAppRule → WdacPackageRule --
@@ -293,7 +313,7 @@ export function convertAppLockerToWdac(
         ?? (rule as unknown as Record<string, unknown>)["PackageId"] as string | undefined;
       if (!pfn) { stats.skippedRules++; continue; }
 
-      const ruleId = `ID_PKG_K_${shortHex()}`;
+      const ruleId = `${action === "deny" ? "ID_DENY" : "ID_ALLOW"}_K_${shortHex()}`;
       fileRules.push({
         kind: "package",
         id: ruleId,
@@ -309,13 +329,8 @@ export function convertAppLockerToWdac(
   // ---- Build signing scenario (user mode only — AppLocker is user-mode) ----
   const allowedSigners: AllowedSigner[] = allowedSignerIds.map((id) => ({ signerId: id }));
 
-  // File rules that are not fileAttrib go into scenario fileRuleRefs
-  const fileRuleRefs = fileRules
-    .filter((r) => r.kind !== "fileAttrib" && r.kind !== "hash" || r.kind === "hash")
-    .map((r) => r.id);
-
-  // Actually only non-signer file rules go into fileRuleRefs; signers are in allowedSigners
-  // Hash/path/package rules → fileRuleRefs
+  // Hash/path/package rules → fileRuleRefs; fileAttrib descriptors are only
+  // referenced from signers and never appear in FileRulesRef.
   const directRuleRefs = fileRules
     .filter((r) => r.kind !== "fileAttrib")
     .map((r) => r.id);
@@ -323,7 +338,7 @@ export function convertAppLockerToWdac(
   const scenarios: WdacSigningScenario[] = [
     {
       value: 12,
-      id: "1",
+      id: "ID_SIGNINGSCENARIO_WINDOWS",
       allowedSigners,
       deniedSigners: [],
       fileRuleRefs: directRuleRefs,
@@ -331,7 +346,8 @@ export function convertAppLockerToWdac(
   ];
 
   const merged: WdacPolicy = {
-    policyId: `{${crypto.randomUUID().toUpperCase()}}`,
+    // Bare GUID — the XML generator adds the surrounding braces.
+    policyId: crypto.randomUUID().toUpperCase(),
     policyType: "Base",
     versionEx: "10.0.0.0",
     friendlyName: "Converted from AppLocker Policy",

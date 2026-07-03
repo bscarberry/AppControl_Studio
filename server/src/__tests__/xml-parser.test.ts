@@ -76,7 +76,7 @@ describe("parseWdacXml", () => {
     const rule = policy.fileRules.find((r) => r.id === "ID_ALLOW_WINDIR");
     expect(rule?.kind).toBe("path");
     if (rule?.kind === "path") {
-      expect(rule.filePath).toContain("%windir%");
+      expect(rule.filePath.toUpperCase()).toContain("%WINDIR%");
       expect(rule.effect).toBe("Allow");
     }
   });

@@ -137,9 +137,19 @@ export function parseWdacXml(xmlContent: string, fileName?: string): ParseResult
   if (!policyId) {
     diagnostics.push(diagError("MISSING_POLICY_ID", "PolicyID attribute or element is missing or unparseable."));
   }
-  if (friendlyName && parseSettingsField(root, "Name")) {
+  if (!attr(root, "FriendlyName") && parseSettingsField(root, "Name")) {
     diagnostics.push(diagInfo("SETTINGS_NAME_FALLBACK",
       "Policy name was read from <Settings> block, not FriendlyName attribute."));
+  }
+
+  // Sections not represented in the WdacPolicy model — warn about data loss
+  // if the policy is regenerated from this model.
+  for (const section of ["Macros", "AppSettings", "ArtifactRules"] as const) {
+    if (root[section] !== undefined) {
+      diagnostics.push(diagWarn("UNSUPPORTED_SECTION",
+        `<${section}> is present in this policy but is not modeled by AppControl Studio. ` +
+        `It will be omitted if you regenerate XML from the parsed policy.`, section));
+    }
   }
 
   // A policy is Supplemental only when it carries a BasePolicyID that differs
@@ -169,6 +179,9 @@ export function parseWdacXml(xmlContent: string, fileName?: string): ParseResult
   // --- CI Signers ---
   const ciSigners = parseCiSigners(root);
 
+  // --- Supplemental Policy Signers ---
+  const supplementalPolicySigners = parseSupplementalPolicySigners(root);
+
   const policy: WdacPolicy = {
     policyId,
     basePolicyId,
@@ -185,6 +198,7 @@ export function parseWdacXml(xmlContent: string, fileName?: string): ParseResult
     signingScenarios,
     updatePolicySigners,
     ciSigners,
+    ...(supplementalPolicySigners.length > 0 && { supplementalPolicySigners }),
     hvciOptions,
     sourceFileName: fileName,
   };
@@ -289,6 +303,9 @@ function findOptionNumber(name: string): number | undefined {
     "Enabled:Secure Setting Policy": 22,
     // Legacy alias used by some older documentation and tooling
     "Enabled:Strict WHQL Attestation": 22,
+    // Newer schema options (present in cipolicy.xsd / AppControl Manager)
+    "Enabled:Conditional Windows Lockdown Policy": 23,
+    "Disabled:Default Windows Certificate Remapping": 24,
   };
   return map[name];
 }
@@ -339,6 +356,23 @@ function parseFileRules(
 }
 
 /**
+ * Infer the hash algorithm of a file rule.
+ *
+ * cipolicy.xsd <Allow>/<Deny> elements carry no HashType attribute — the
+ * algorithm is implied by the digest length (40 hex chars = SHA-1,
+ * 64 = SHA-256). Page-hash rules are distinguishable only by the naming
+ * convention Microsoft tooling embeds in the ID / FriendlyName ("Page Sha1",
+ * "Hash Page Sha256", etc.).
+ */
+function inferHashType(hash: string, id: string, friendlyName?: string): HashType {
+  const label = `${id} ${friendlyName ?? ""}`.toLowerCase();
+  const isPage = label.includes("page");
+  if (hash.length === 40) return isPage ? "SHA1Page" : "SHA1";
+  // 64 hex chars (or anything else) — treat as SHA-256 family
+  return isPage ? "SHA256Page" : "SHA256";
+}
+
+/**
  * Classifies an <Allow> or <Deny> element into the most specific rule kind
  * based on which discriminating fields are present.
  * Priority: hash > path > package > attribute (catch-all)
@@ -358,8 +392,10 @@ function classifyEffectRule(
 
   const hash = attr(r, "Hash");
   if (hash) {
-    const hashType = (attr(r, "HashType") ?? "SHA256") as HashType;
-    const rule: WdacHashRule = { kind: "hash", id, effect, hash, hashType };
+    const rule: WdacHashRule = {
+      kind: "hash", id, effect, hash,
+      hashType: inferHashType(hash, id, friendlyName),
+    };
     if (friendlyName) rule.friendlyName = friendlyName;
     const fileName = attr(r, "FileName");
     if (fileName) rule.fileName = fileName;
@@ -614,6 +650,14 @@ function parseCiSigners(root: Record<string, unknown>): string[] {
   if (!section) return [];
   return asArray(section["CiSigner"])
     .map((c) => attr(c as Record<string, unknown>, "SignerId") ?? attr(c as Record<string, unknown>, "SignerID") ?? "")
+    .filter(Boolean);
+}
+
+function parseSupplementalPolicySigners(root: Record<string, unknown>): string[] {
+  const section = root["SupplementalPolicySigners"] as Record<string, unknown> | undefined;
+  if (!section) return [];
+  return asArray(section["SupplementalPolicySigner"])
+    .map((s) => attr(s as Record<string, unknown>, "SignerId") ?? attr(s as Record<string, unknown>, "SignerID") ?? "")
     .filter(Boolean);
 }
 

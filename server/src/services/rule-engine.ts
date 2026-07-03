@@ -379,10 +379,15 @@ function buildSignerGroups(events: ParsedCiEvent[]): SignerGroup[] {
     const info = ev.signerInfo;
     if (!info?.publisherName) continue;
 
-    // Key combines publisher + root cert TBS (or issuer as fallback)
+    // The trust anchor for the CertRoot is the issuer/CA TBS hash. EVTX 3089
+    // events populate issuerTbsHash; Advanced Hunting legacy rows may carry
+    // rootCertTbs instead.
+    const anchorTbs = info.issuerTbsHash ?? info.rootCertTbs;
+
+    // Key combines publisher + CA cert TBS (or issuer name as fallback)
     const key = [
       info.publisherName.toLowerCase().trim(),
-      info.rootCertTbs ?? info.issuerName ?? "",
+      anchorTbs ?? info.issuerName ?? "",
     ].join("||");
 
     if (!map.has(key)) {
@@ -390,8 +395,8 @@ function buildSignerGroups(events: ParsedCiEvent[]): SignerGroup[] {
         key,
         publisherName: info.publisherName,
         issuerName: info.issuerName,
-        rootCertTbs: info.rootCertTbs,
-        leafCertTbs: info.leafCertTbs,
+        rootCertTbs: anchorTbs,
+        leafCertTbs: info.leafCertTbs ?? info.publisherTbsHash,
         events: [],
       });
     }
@@ -619,13 +624,17 @@ function buildSignerProposal(
   const events = group.events;
 
   const signerId = nextSignerId();
+  // CertPublisher matches the leaf certificate's CN — extract it when the
+  // event carries a full distinguished name ("CN=Vendor, O=…, C=…").
+  const publisherCn =
+    group.publisherName.match(/^CN=([^,]+)/i)?.[1]?.trim() ?? group.publisherName;
   const signerRule: WdacSignerRule = {
     id: signerId,
     name: group.publisherName,
     ...(group.rootCertTbs
       ? { certRoot: { type: "TBS" as const, value: group.rootCertTbs } }
       : {}),
-    ...(group.publisherName ? { certPublisher: group.publisherName } : {}),
+    certPublisher: publisherCn,
   };
 
   let fileAttrib: WdacFileAttrib | undefined;
