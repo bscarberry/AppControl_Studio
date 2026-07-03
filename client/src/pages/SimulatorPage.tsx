@@ -63,9 +63,11 @@ function phaseLabel(phase: EvalPhase): string {
     "deny-hash": "Deny Hash",
     "deny-publisher": "Deny Publisher",
     "deny-path": "Deny Path",
+    "deny-attribute": "Deny Attribute",
     "allow-publisher": "Allow Publisher",
     "allow-publisher-scoped": "Allow Publisher (Scoped)",
     "allow-hash": "Allow Hash",
+    "allow-attribute": "Allow Attribute",
     "allow-path": "Allow Path",
     default: "Default",
   };

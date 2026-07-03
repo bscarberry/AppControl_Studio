@@ -228,10 +228,10 @@ export function simulateBinary(
   for (const rule of denyFileRules.filter((r) => r.kind === "attribute")) {
     const m = matchAttributes(rule as WdacAttributeRule, binary);
     pushStep(steps, {
-      phase: "deny-path",
+      phase: "deny-attribute",
       ruleId: rule.id,
       ruleName: rule.friendlyName ?? rule.id,
-      ruleType: "deny-publisher",
+      ruleType: "deny-attribute",
       outcome: stepOutcome(m),
       detail: m.detail,
     });
@@ -400,7 +400,7 @@ export function simulateBinary(
   for (const rule of allowFileRules.filter((r) => r.kind === "attribute")) {
     const m = matchAttributes(rule as WdacAttributeRule, binary);
     pushStep(steps, {
-      phase: "allow-path",
+      phase: "allow-attribute",
       ruleId: rule.id,
       ruleName: rule.friendlyName ?? rule.id,
       ruleType: "allow-attribute",

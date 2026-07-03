@@ -151,7 +151,7 @@ export function addFileRule(
     if (!existingValues.has(sv)) {
       missingScenarios.push({
         value: sv,
-        id: String(sv === 131 ? 0 : 1),
+        id: sv === 131 ? "ID_SIGNINGSCENARIO_DRIVERS" : "ID_SIGNINGSCENARIO_WINDOWS",
         allowedSigners: [],
         deniedSigners: [],
         fileRuleRefs: [],
@@ -201,7 +201,7 @@ export function addSigner(
     if (!existingValues.has(scenarioValue)) {
       missingScenarios.push({
         value: scenarioValue,
-        id: String(scenarioValue === 131 ? 0 : 1),
+        id: scenarioValue === 131 ? "ID_SIGNINGSCENARIO_DRIVERS" : "ID_SIGNINGSCENARIO_WINDOWS",
         allowedSigners: [],
         deniedSigners: [],
         fileRuleRefs: [],
