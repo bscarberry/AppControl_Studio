@@ -118,8 +118,11 @@ export function simulateBinary(
     warnings.push(
       `Signing scenario ${scenarioValue} is not defined in this policy. This may indicate an incomplete policy configuration.`
     );
+    // App Control is default-deny: with enforcement active for this mode and
+    // no rules authorizing the binary, it is blocked — an absent scenario
+    // element provides no allow rules, not an exemption.
     return finalResult(
-      "allowed",
+      "blocked",
       undefined,
       undefined,
       "no-scenario",
@@ -127,7 +130,7 @@ export function simulateBinary(
       scenarioValue as 131 | 12,
       steps,
       warnings,
-      `Signing scenario ${scenarioValue} (${scenarioValue === 131 ? "kernel" : "user"} mode) is absent from this policy — the binary is not subject to enforcement under this scenario.`
+      `Signing scenario ${scenarioValue} (${scenarioValue === 131 ? "kernel" : "user"} mode) is absent from this policy, so it contains no allow rules for this binary. App Control's implicit default action is deny.`
     );
   }
 
@@ -225,10 +228,10 @@ export function simulateBinary(
   for (const rule of denyFileRules.filter((r) => r.kind === "attribute")) {
     const m = matchAttributes(rule as WdacAttributeRule, binary);
     pushStep(steps, {
-      phase: "deny-path",
+      phase: "deny-attribute",
       ruleId: rule.id,
       ruleName: rule.friendlyName ?? rule.id,
-      ruleType: "deny-publisher",
+      ruleType: "deny-attribute",
       outcome: stepOutcome(m),
       detail: m.detail,
     });
@@ -397,7 +400,7 @@ export function simulateBinary(
   for (const rule of allowFileRules.filter((r) => r.kind === "attribute")) {
     const m = matchAttributes(rule as WdacAttributeRule, binary);
     pushStep(steps, {
-      phase: "allow-path",
+      phase: "allow-attribute",
       ruleId: rule.id,
       ruleName: rule.friendlyName ?? rule.id,
       ruleType: "allow-attribute",
@@ -485,7 +488,9 @@ interface MatchOutcome {
 
 function matchHash(rule: WdacHashRule, binary: BinaryMetadata): MatchOutcome {
   const isSha256 =
-    rule.hashType === "SHA256" || rule.hashType === "SHA256Flat";
+    rule.hashType === "SHA256" ||
+    rule.hashType === "SHA256Flat" ||
+    rule.hashType === "SHA256Page";
   const binaryHash = isSha256 ? binary.sha256 : binary.sha1;
   const hashLabel = isSha256 ? "SHA-256" : "SHA-1";
 
@@ -497,7 +502,7 @@ function matchHash(rule: WdacHashRule, binary: BinaryMetadata): MatchOutcome {
     };
   }
 
-  const normalise = (h: string) => h.toLowerCase().replace(/^0+/, "");
+  const normalise = (h: string) => h.toLowerCase();
   const matched = normalise(binaryHash) === normalise(rule.hash);
   return {
     matched,
@@ -691,7 +696,16 @@ function matchSigner(
   }
 
   // --- certIssuer ---
-  if (signer.certIssuer && binary.issuerName) {
+  if (signer.certIssuer) {
+    if (!binary.issuerName) {
+      // The rule constrains the issuing CA but the binary's issuer is unknown —
+      // we cannot assert a match, so the rule is skipped (not assumed to pass).
+      return {
+        matched: false,
+        skipped: true,
+        detail: `Signer "${signer.name}": certIssuer check requires the binary's issuer name — not provided.`,
+      };
+    }
     if (ci(binary.issuerName) !== ci(signer.certIssuer)) {
       checks.push(
         `certIssuer "${signer.certIssuer}": ✗ (binary: "${binary.issuerName}")`

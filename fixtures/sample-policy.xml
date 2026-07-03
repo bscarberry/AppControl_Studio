@@ -71,7 +71,7 @@
     <Deny
       ID="ID_DENY_MIMIKATZ"
       FriendlyName="Deny mimikatz (known hash)"
-      Hash="A3D1E9F2B04C5E7F9A1C3D5B8E2F4A6C9B1D3E5F7A2C4B6D8E0F2A4C6B8D0E2"
+      Hash="A3D1E9F2B04C5E7F9A1C3D5B8E2F4A6C9B1D3E5F7A2C4B6D8E0F2A4C6B8D0E2A"
       HashType="SHA256" />
   </FileRules>
 
@@ -84,13 +84,13 @@
 
     <!-- Microsoft Windows WHQL driver signer -->
     <Signer ID="ID_SIGNER_WHQL_PROD" Name="Microsoft Windows WHQL Driver (Production)">
-      <CertRoot Type="TBS" Value="1C3D5B8E2F4A6C9B1D3E5F7A2C4B6D8E0F2A4C6B8D0E2F4A6C8B0D2E4F6A8C0" />
+      <CertRoot Type="TBS" Value="1C3D5B8E2F4A6C9B1D3E5F7A2C4B6D8E0F2A4C6B8D0E2F4A6C8B0D2E4F6A8C0A" />
       <CertEKU ID="ID_EKU_WHQL" />
     </Signer>
 
     <!-- Third-party publisher signer scoped to Google Chrome via FileAttrib -->
     <Signer ID="ID_SIGNER_GOOGLE" Name="Google LLC">
-      <CertRoot Type="TBS" Value="7E2D4A6C8B0E2F4A6C8B0D2E4F6A8C0D2E4F6A8C0D2E4F6A8C0D2E4F6A8C0D2" />
+      <CertRoot Type="TBS" Value="7E2D4A6C8B0E2F4A6C8B0D2E4F6A8C0D2E4F6A8C0D2E4F6A8C0D2E4F6A8C0D2A" />
       <CertPublisher Value="Google LLC" />
       <FileAttribRef RuleID="ID_FILEATTRIB_CHROME" />
     </Signer>
@@ -98,7 +98,7 @@
 
   <SigningScenarios>
     <!-- Kernel Mode Signing Scenario (Value=131) — drivers -->
-    <SigningScenario ID="ID_SIGNINGSCENARIO_DRIVERS_1" FriendlyName="AppControl Studio Sample Policy" Value="131" MinimumHashAlgorithm="65536">
+    <SigningScenario ID="ID_SIGNINGSCENARIO_DRIVERS_1" FriendlyName="AppControl Studio Sample Policy" Value="131" MinimumHashAlgorithm="32780">
       <ProductSigners>
         <AllowedSigners>
           <AllowedSigner SignerId="ID_SIGNER_WINDOWS_PROD_RS1" />

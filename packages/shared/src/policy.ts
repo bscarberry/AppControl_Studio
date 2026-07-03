@@ -36,6 +36,8 @@ export const POLICY_RULE_OPTIONS = {
   20: { name: "Enabled:Revoked Expired As Unsigned", description: "Treats revoked or expired certificates as unsigned." },
   21: { name: "Enabled:Developer Mode Dynamic Code Trust", description: "Trusts UWP apps debugged or sideloaded via Visual Studio or Device Portal when Developer Mode is enabled on the device." },
   22: { name: "Enabled:Secure Setting Policy", description: "Enables enforcement of secure policy settings tied to Secure Boot — restricts policy modification to signed updates only." },
+  23: { name: "Enabled:Conditional Windows Lockdown Policy", description: "Enables the conditional Windows Lockdown (S mode) policy behavior on capable editions." },
+  24: { name: "Disabled:Default Windows Certificate Remapping", description: "Disables the default remapping of Windows certificates — signers are matched exactly as specified instead of being remapped to updated Windows roots." },
 } as const;
 
 export type PolicyRuleOptionNumber = keyof typeof POLICY_RULE_OPTIONS;
@@ -49,9 +51,12 @@ export interface PolicyRuleOption {
 // Signing Scenarios
 // ---------------------------------------------------------------------------
 
+// SigningScenario ID attributes are xs:ID values in cipolicy.xsd — they must be
+// valid XML NCNames (cannot start with a digit). Use the conventional
+// ID_SIGNINGSCENARIO_* identifiers emitted by Microsoft tooling.
 export const SIGNING_SCENARIO = {
-  KERNEL: { value: 131, id: "0", label: "Kernel Mode (131)" },
-  USER:   { value: 12,  id: "1", label: "User Mode (12)" },
+  KERNEL: { value: 131, id: "ID_SIGNINGSCENARIO_DRIVERS", label: "Kernel Mode (131)" },
+  USER:   { value: 12,  id: "ID_SIGNINGSCENARIO_WINDOWS", label: "User Mode (12)" },
 } as const;
 
 export type SigningScenarioValue = 131 | 12;
@@ -78,7 +83,7 @@ export interface WdacEku {
 //   fileAttrib → <FileAttrib ...> — signer-scoping descriptor, no Allow/Deny effect
 // ---------------------------------------------------------------------------
 
-export type HashType = "SHA256" | "SHA1" | "SHA256Flat" | "SHA1Page";
+export type HashType = "SHA256" | "SHA1" | "SHA256Flat" | "SHA1Page" | "SHA256Page";
 
 /** Effect of an Allow/Deny file rule. WdacFileAttrib descriptors carry no effect. */
 export type FileRuleEffect = "Allow" | "Deny";
@@ -288,6 +293,12 @@ export interface WdacPolicy {
   updatePolicySigners: string[];
   /** Signer IDs for Code Integrity signers */
   ciSigners: string[];
+  /**
+   * Signer IDs authorized to sign supplemental policies for this base policy
+   * (<SupplementalPolicySigners>). Required for signed base policies that
+   * allow supplemental policies without Option 6.
+   */
+  supplementalPolicySigners?: string[];
 
   /** Hypervisor Code Integrity options bitmask */
   hvciOptions?: number;

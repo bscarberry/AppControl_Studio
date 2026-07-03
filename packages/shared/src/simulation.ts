@@ -106,9 +106,11 @@ export type EvalPhase =
   | "deny-hash"              // Explicit deny by SHA-256 or SHA-1
   | "deny-publisher"         // Explicit deny by signer/publisher rule
   | "deny-path"              // Explicit deny by file-path pattern
+  | "deny-attribute"         // Explicit deny by file version-resource attributes
   | "allow-publisher"        // Unscoped publisher allow rule
   | "allow-publisher-scoped" // Publisher allow rule + FileAttrib scope check
   | "allow-hash"             // Allow by SHA-256 or SHA-1 hash
+  | "allow-attribute"        // Allow by file version-resource attributes
   | "allow-path"             // Allow by file-path pattern (broadest)
   | "default";               // No rule matched — implicit policy default
 
@@ -129,6 +131,7 @@ export type SimRuleType =
   | "deny-publisher"
   | "deny-publisher-scoped"
   | "deny-path"
+  | "deny-attribute"
   | "allow-hash"
   | "allow-publisher"
   | "allow-publisher-scoped"

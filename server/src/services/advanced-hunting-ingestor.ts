@@ -480,13 +480,14 @@ function classifySigningCoverage(binary: HuntingBinary): HuntingSigningCoverage 
 // Path normalisation — map drive-letter paths to WDAC environment variables
 // ---------------------------------------------------------------------------
 
+// WDAC's kernel path engine only expands %OSDRIVE%, %WINDIR%, and %SYSTEM32%
+// (WDAC Policy Wizard Helper.cs). Anything else must stay a concrete path
+// anchored at %OSDRIVE% — macros like %PROGRAMFILES% would be treated as
+// literal directory names by CI.
 const PATH_SUBSTITUTIONS: Array<[RegExp, string]> = [
+  [/^[A-Za-z]:\\Windows\\System32\\/i, "%SYSTEM32%\\"],
   [/^[A-Za-z]:\\Windows\\/i, "%WINDIR%\\"],
-  [/^[A-Za-z]:\\Program Files \(x86\)\\/i, "%PROGRAMFILESX86%\\"],
-  [/^[A-Za-z]:\\Program Files\\/i, "%PROGRAMFILES%\\"],
-  [/^[A-Za-z]:\\ProgramData\\/i, "%PROGRAMDATA%\\"],
-  [/^[A-Za-z]:\\Users\\[^\\]+\\/i, "%USERPROFILE%\\"],
-  [/^[A-Za-z]:\\System32\\/i, "%WINDIR%\\System32\\"],
+  [/^[A-Za-z]:\\/i, "%OSDRIVE%\\"],
 ];
 
 function normalizeWdacPath(rawPath: string): string {
