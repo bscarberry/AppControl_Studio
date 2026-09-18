@@ -1,6 +1,35 @@
 // Value exports
-export { POLICY_RULE_OPTIONS, SIGNING_SCENARIO } from "./policy";
+export { POLICY_RULE_OPTIONS, SIGNING_SCENARIO, SUPPLEMENTAL_ALLOWED_OPTIONS, WELLKNOWN_ROOTS } from "./policy";
 export { CI_EVENT_IDS } from "./events";
+export { RULE_LEVELS } from "./file-inspection";
+export {
+  normalizeGuid,
+  isValidGuid,
+  newGuid,
+  NIL_GUID,
+  fileRuleIdFor,
+  signerIdFor,
+  ekuIdFor,
+  isSchemaValidFileRuleId,
+  isSchemaValidSignerId,
+  isSchemaValidEkuId,
+  isSchemaValidScenarioId,
+  regenerateIds,
+  fileRuleFingerprint,
+  signerFingerprint,
+  deduplicatePolicy,
+  clearAllRules,
+  setPolicyType,
+  OPTION_PRESETS,
+  applyOptionPreset,
+  setOption,
+  hasOption,
+  applyRuleBundles,
+  resolveFileAttribs,
+  ekuValueToOid,
+  oidToEkuValue,
+  KNOWN_EKUS,
+} from "./policy-tools";
 
 // Runtime helper
 export { isEffectRule } from "./policy";
@@ -30,6 +59,8 @@ export type {
   PolicyType,
   PolicyFormat,
   SignerSpecificity,
+  WdacSetting,
+  WdacSettingValueType,
   WdacPolicy,
   DiagnosticSeverity,
   ParseDiagnostic,
@@ -41,6 +72,14 @@ export type {
   ScenarioDiff,
   PolicyComparisonResult,
 } from "./policy";
+
+// Type re-exports from policy-tools
+export type {
+  DeduplicateResult,
+  OptionPreset,
+  ApplyRuleBundlesOptions,
+  ApplyRuleBundlesResult,
+} from "./policy-tools";
 
 // Type re-exports from events
 export type {
@@ -117,6 +156,43 @@ export type {
   EvalStep,
   EvaluationResult,
 } from "./simulation";
+
+// Type re-exports from file-inspection
+export type {
+  CodeIntegrityHashes,
+  TbsHashAlgorithm,
+  InspectedCertificate,
+  InspectedSignature,
+  PeVersionInfo,
+  InspectedFileType,
+  PeKind,
+  InspectedFile,
+  RuleLevel,
+  FileRuleBundle,
+  InspectFilesResponse,
+  BuildFileRulesRequest,
+  BuildFileRulesResponse,
+} from "./file-inspection";
+
+// Type re-exports from validation
+export type {
+  ValidationSeverity,
+  ValidationPhase,
+  ValidationFinding,
+  ToolchainValidation,
+  PolicyValidationResult,
+  ValidatePolicyRequest,
+} from "./validation";
+
+// Type re-exports from templates
+export type {
+  PolicyTemplateId,
+  PolicyTemplateCategory,
+  PolicyTemplateInfo,
+  CreateFromTemplateRequest,
+  CreateFromTemplateResponse,
+  PolicyTemplatesResponse,
+} from "./templates";
 
 // Type re-exports from api
 export type {

@@ -213,6 +213,8 @@ export interface WdacSignerRule {
   certOemID?: string;
   /** References to FileAttrib rules that scope this signer */
   fileAttribRefs?: string[];
+  /** Optional SignTimeAfter attribute (ISO date) — only files signed after this time match */
+  signTimeAfter?: string;
   /**
    * The specificity level of this publisher rule (WDAC Wizard concept).
    * Informational — derived from the cert fields present.
@@ -266,6 +268,59 @@ export type PolicyType = "Base" | "Supplemental";
  */
 export type PolicyFormat = "MultiplePolicy" | "SinglePolicy";
 
+// ---------------------------------------------------------------------------
+// Settings — <Settings><Setting Provider Key ValueName><Value>…</Value>
+//
+// Microsoft example policies carry settings beyond PolicyInfo Name/Id
+// (AllHostIds/EnterpriseDefinedClsId, WindowsLockdownPolicySettings, …).
+// They are preserved verbatim so a parse → generate round trip is lossless.
+// ---------------------------------------------------------------------------
+
+export type WdacSettingValueType = "String" | "Boolean" | "DWord" | "Binary";
+
+export interface WdacSetting {
+  provider: string;
+  key: string;
+  valueName: string;
+  valueType: WdacSettingValueType;
+  /** String form of the value ("true"/"false" for Boolean, decimal for DWord, hex for Binary) */
+  value: string;
+}
+
+/**
+ * Policy rule options permitted in a Supplemental policy (all others are
+ * inherited from the base policy). Source: Microsoft App Control docs,
+ * "Policy rule options" table — options valid for supplemental policies.
+ */
+export const SUPPLEMENTAL_ALLOWED_OPTIONS: ReadonlySet<number> = new Set([5, 6, 7, 13, 14, 18]);
+
+/**
+ * Well-known root certificate IDs used by <CertRoot Type="Wellknown">.
+ * Values confirmed from the Microsoft example policies shipped with Windows
+ * (AllowMicrosoft.xml, DefaultWindows_*.xml, SmartAppControl.xml); the
+ * remaining entries follow the WDAC Policy Wizard reference list.
+ */
+export const WELLKNOWN_ROOTS: Record<string, string> = {
+  "00": "None",
+  "01": "Unknown",
+  "02": "Self-Signed",
+  "03": "Microsoft Authenticode(tm) Root Authority",
+  "04": "Microsoft Product Root 1997",
+  "05": "Microsoft Product Root 2001",
+  "06": "Microsoft Product Root 2010",
+  "07": "Microsoft Standard Root 2011",
+  "08": "Microsoft Code Verification Root 2006",
+  "09": "Microsoft Test Root 1999",
+  "0A": "Microsoft Test Root 2010",
+  "0B": "Microsoft DMD Test Root 2005",
+  "0C": "Microsoft DMD Root 2005",
+  "0D": "Microsoft DMD Preview Root 2005",
+  "0E": "Microsoft Flight Root 2014",
+  "0F": "Microsoft Third Party Marketplace Root",
+  "14": "Authroot (dummy)",
+  "16": "Azure Code Signing (Microsoft Identity Verification Root 2020)",
+};
+
 export interface WdacPolicy {
   /** Unique GUID identifying this policy */
   policyId: string;
@@ -309,6 +364,13 @@ export interface WdacPolicy {
    * Defaults to MultiplePolicy when not specified.
    */
   policyFormat?: PolicyFormat;
+
+  /**
+   * All <Settings> entries. PolicyInfo Name/Id are ALSO surfaced as
+   * friendlyName / settingsId for convenience; the generator keeps the two in
+   * sync (friendlyName/settingsId win when both are present).
+   */
+  settings?: WdacSetting[];
 
   /** Parsed from file — source filename for display */
   sourceFileName?: string;

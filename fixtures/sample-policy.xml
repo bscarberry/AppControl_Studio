@@ -9,6 +9,9 @@
     This matches the output of ConvertFrom-CIPolicy / Set-CIPolicyIdInfo and the cipolicy.xsd schema.
   - The FriendlyName and Id values are stored in the <Settings> block per the schema.
   - A Base policy does NOT carry a <BasePolicyID> element (or it equals the PolicyID).
+  - <Allow>/<Deny> elements carry no HashType attribute (cipolicy.xsd): the algorithm
+    is implied by the digest length. This file validates against cipolicy.xsd and
+    converts with ConvertFrom-CIPolicy.
 -->
 <SiPolicy
   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
@@ -51,8 +54,7 @@
     <Allow
       ID="ID_ALLOW_NOTEPAD"
       FriendlyName="Allow notepad.exe (known good hash)"
-      Hash="D9D26C24B4D6DE73B0671A3E4E0553FEF7DA25E6C9ADE03EAD86C1EF12E17F5F"
-      HashType="SHA256" />
+      Hash="D9D26C24B4D6DE73B0671A3E4E0553FEF7DA25E6C9ADE03EAD86C1EF12E17F5F" />
 
     <!-- Path-based allow rule using the %WINDIR% macro -->
     <Allow
@@ -71,8 +73,7 @@
     <Deny
       ID="ID_DENY_MIMIKATZ"
       FriendlyName="Deny mimikatz (known hash)"
-      Hash="A3D1E9F2B04C5E7F9A1C3D5B8E2F4A6C9B1D3E5F7A2C4B6D8E0F2A4C6B8D0E2A"
-      HashType="SHA256" />
+      Hash="A3D1E9F2B04C5E7F9A1C3D5B8E2F4A6C9B1D3E5F7A2C4B6D8E0F2A4C6B8D0E2A" />
   </FileRules>
 
   <Signers>

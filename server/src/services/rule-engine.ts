@@ -66,6 +66,18 @@ interface PathGroup {
 }
 
 // ---------------------------------------------------------------------------
+// Hash selection
+//
+// EVTX-sourced events carry the SHA-256 FLAT hash (sha256FlatHash) that WDAC
+// uses in <Allow Hash>; Advanced Hunting rows carry the legacy sha256Hash.
+// Always consult both so EVTX imports are not mis-classified as "no hash".
+// ---------------------------------------------------------------------------
+
+function eventHash(ev: ParsedCiEvent): string | undefined {
+  return ev.sha256FlatHash ?? ev.sha256Hash;
+}
+
+// ---------------------------------------------------------------------------
 // Precedence constants (lower number = evaluated first by WDAC)
 // ---------------------------------------------------------------------------
 
@@ -419,17 +431,18 @@ function buildHashGroups(
 
   for (const ev of events) {
     if (coveredPaths.has(ev.filePath)) continue;
-    if (!ev.sha256Hash) continue;
+    const h = eventHash(ev);
+    if (!h) continue;
 
-    if (!map.has(ev.sha256Hash)) {
-      map.set(ev.sha256Hash, {
-        hash: ev.sha256Hash,
+    if (!map.has(h)) {
+      map.set(h, {
+        hash: h,
         hashType: "SHA256",
         events: [],
       });
     }
 
-    map.get(ev.sha256Hash)!.events.push(ev);
+    map.get(h)!.events.push(ev);
   }
 
   // Compute consensus filename per group
@@ -452,7 +465,7 @@ function buildPathGroups(
 
   for (const ev of events) {
     if (coveredPaths.has(ev.filePath)) continue;
-    if (ev.sha256Hash) continue; // Already handled by hash group
+    if (eventHash(ev)) continue; // Already handled by hash group
 
     // Use directory as the grouping key, not the full path
     const path = ev.filePath;
@@ -674,7 +687,7 @@ function buildSignerProposal(
     hasRootCertTbs,
     true,
     hasIssuer,
-    events.some((e) => Boolean(e.sha256Hash)),
+    events.some((e) => Boolean(eventHash(e))),
     Boolean(scopeResult?.productName),
     Boolean(scopeResult?.originalFileName)
   );
@@ -1121,7 +1134,7 @@ export function proposeRules(
     const uncoveredEvents = events.filter(
       (ev) =>
         !coveredPaths.has(ev.filePath) &&
-        !ev.sha256Hash &&
+        !eventHash(ev) &&
         !ev.signerInfo?.publisherName
     );
     if (uncoveredEvents.length > 0) {

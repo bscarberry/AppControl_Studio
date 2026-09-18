@@ -22,6 +22,7 @@ import type {
 } from "@appcontrol/shared";
 import type { ParsedCiEvent, FileRuleType, FileRuleSelection } from "@appcontrol/shared";
 import type { CreatePolicyFromEventsRequest } from "@appcontrol/shared";
+import { normalizeGuid, NIL_GUID } from "@appcontrol/shared";
 
 // ---------------------------------------------------------------------------
 // Policy Templates
@@ -80,8 +81,10 @@ function getBaseTemplateOptions(template: TemplateName): PolicyRuleOption[] {
 function detectBasePolicyId(events: ParsedCiEvent[]): string | undefined {
   const counts = new Map<string, number>();
   for (const ev of events) {
-    const guid = ev.policyGuid;
-    if (guid && guid.length > 0) {
+    // Event PolicyGuid values are brace-wrapped ("{GUID}"); normalise them and
+    // ignore the all-zero placeholder GUID, which never identifies a real base.
+    const guid = normalizeGuid(ev.policyGuid);
+    if (guid && guid !== NIL_GUID) {
       counts.set(guid, (counts.get(guid) ?? 0) + 1);
     }
   }
@@ -184,9 +187,16 @@ export function buildPolicyFromEvents(
   const isSupplemental = (req.policyType ?? "Supplemental") === "Supplemental";
 
   // Resolve base policy GUID: use explicit override, then auto-detect from events
+  const explicitBase = normalizeGuid(req.basePolicyId);
   const basePolicyId = isSupplemental
-    ? (req.basePolicyId?.replace(/^\{|\}$/g, "").toUpperCase() || detectBasePolicyId(req.events))
+    ? (explicitBase && explicitBase !== NIL_GUID ? explicitBase : detectBasePolicyId(req.events))
     : undefined;
+  if (isSupplemental && !basePolicyId) {
+    log.push(
+      "WARNING: no base policy GUID could be determined from the request or the events. " +
+      "Set basePolicyId before deploying — a supplemental policy must reference its base."
+    );
+  }
 
   log.push(`Building policy '${req.policyName}' from ${req.events.length} events.`);
   log.push(`Type: ${isSupplemental ? "Supplemental" : "Base"}`);

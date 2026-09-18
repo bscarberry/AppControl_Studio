@@ -354,6 +354,11 @@ export function convertAppLockerToWdac(
     options: [
       { value: 0, enabled: true },  // UMCI
       { value: 3, enabled: true },  // Audit Mode (safe default)
+      // Required for an unsigned policy — without it ConvertFrom-CIPolicy
+      // refuses the XML ("Signed policy is required, but no UpdatePolicySigner
+      // is specified") and CiTool cannot load the binary.
+      { value: 6, enabled: true },  // Unsigned System Integrity Policy
+      { value: 16, enabled: true }, // Update Policy No Reboot
       { value: 17, enabled: true }, // Allow Supplemental Policies
     ],
     ekus: [],

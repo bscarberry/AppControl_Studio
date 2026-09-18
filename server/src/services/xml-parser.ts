@@ -23,6 +23,8 @@ import type {
   WdacEku,
   PolicyRuleOption,
   PolicyRuleOptionNumber,
+  WdacSetting,
+  WdacSettingValueType,
   AllowedSigner,
   DeniedSigner,
   SigningScenarioValue,
@@ -104,6 +106,9 @@ export function parseWdacXml(xmlContent: string, fileName?: string): ParseResult
       return alwaysArray.has(_name) && !isLeafNode;
     },
     parseAttributeValue: false,
+    // Never coerce element text: <String>022422</String> must stay "022422",
+    // not become the number 22422 (PolicyInfo Id values are often numeric-looking).
+    parseTagValue: false,
     trimValues: true,
   });
 
@@ -121,9 +126,28 @@ export function parseWdacXml(xmlContent: string, fileName?: string): ParseResult
 
   // --- Top-level attributes ---
   // GUIDs in the XML are wrapped in curly braces: PolicyID="{GUID}" — strip them for normalization
-  const policyId = normalizeGuid(attr(root, "PolicyID") ?? attr(root, "policyId")) ?? "";
+  const rawPolicyId = normalizeGuid(attr(root, "PolicyID") ?? attr(root, "policyId"));
   const basePolicyId = normalizeGuid(attr(root, "BasePolicyID") ?? attr(root, "basePolicyId"));
   const policyTypeId = normalizeGuid(attr(root, "PolicyTypeID") ?? attr(root, "policyTypeId"));
+
+  // Legacy single-policy format: identity is carried by <PolicyTypeID> and
+  // there is no <PolicyID>/<BasePolicyID> (e.g. Microsoft's recommended
+  // driver block rules). Treat PolicyTypeID as the policy identity so the
+  // model stays usable and the generator can re-emit the same format.
+  const isSinglePolicyFormat = !rawPolicyId && !!policyTypeId;
+  const policyId = rawPolicyId ?? (isSinglePolicyFormat ? policyTypeId! : "");
+  if (isSinglePolicyFormat) {
+    diagnostics.push(diagInfo("SINGLE_POLICY_FORMAT",
+      "Policy uses the legacy single-policy format (PolicyTypeID without PolicyID). " +
+      "It will be regenerated in the same format unless policyFormat is changed."));
+  }
+
+  const policyTypeAttr = attr(root, "PolicyType");
+  if (policyTypeAttr === "AppID Tagging Policy") {
+    diagnostics.push(diagWarn("APPID_TAGGING_POLICY",
+      "This is an AppID Tagging policy. AppControl Studio models it as a Base policy; " +
+      "AppIDTags are not preserved on regeneration."));
+  }
   const friendlyName =
     attr(root, "FriendlyName") ??
     attr(root, "friendlyName") ??
@@ -150,6 +174,13 @@ export function parseWdacXml(xmlContent: string, fileName?: string): ParseResult
         `<${section}> is present in this policy but is not modeled by AppControl Studio. ` +
         `It will be omitted if you regenerate XML from the parsed policy.`, section));
     }
+  }
+  const fileRulesSectionForDiag = root["FileRules"] as Record<string, unknown> | undefined;
+  if (fileRulesSectionForDiag && fileRulesSectionForDiag["FileRule"] !== undefined) {
+    const n = asArray(fileRulesSectionForDiag["FileRule"]).length;
+    diagnostics.push(diagWarn("UNSUPPORTED_SECTION",
+      `${n} generic <FileRule Type="…"> element(s) are present but not modeled; ` +
+      `they will be omitted if you regenerate XML from the parsed policy.`, "FileRule"));
   }
 
   // A policy is Supplemental only when it carries a BasePolicyID that differs
@@ -182,6 +213,9 @@ export function parseWdacXml(xmlContent: string, fileName?: string): ParseResult
   // --- Supplemental Policy Signers ---
   const supplementalPolicySigners = parseSupplementalPolicySigners(root);
 
+  // --- Settings (all providers, preserved for lossless round-trip) ---
+  const settings = parseAllSettings(root, diagnostics);
+
   const policy: WdacPolicy = {
     policyId,
     basePolicyId,
@@ -200,6 +234,8 @@ export function parseWdacXml(xmlContent: string, fileName?: string): ParseResult
     ciSigners,
     ...(supplementalPolicySigners.length > 0 && { supplementalPolicySigners }),
     hvciOptions,
+    ...(isSinglePolicyFormat && { policyFormat: "SinglePolicy" as const }),
+    ...(settings.length > 0 && { settings }),
     sourceFileName: fileName,
   };
 
@@ -501,6 +537,9 @@ function parseSigners(
     const certOemIdEl = signerObj["CertOemID"] as Record<string, unknown> | undefined;
     const certOemID = certOemIdEl ? attr(certOemIdEl, "Value") : undefined;
 
+    // SignTimeAfter (optional attribute)
+    const signTimeAfter = attr(signerObj, "SignTimeAfter");
+
     // FileAttribRef (array)
     const fileAttribRefList = asArray(signerObj["FileAttribRef"]);
     const fileAttribRefs = fileAttribRefList
@@ -518,6 +557,7 @@ function parseSigners(
       ...(certPublisher && { certPublisher }),
       ...(certOemID && { certOemID }),
       ...(fileAttribRefs.length > 0 && { fileAttribRefs }),
+      ...(signTimeAfter && { signTimeAfter }),
     });
   }
 
@@ -543,6 +583,12 @@ function parseSigningScenarios(
     if (value !== 131 && value !== 12) {
       diagnostics.push(diagWarn("UNEXPECTED_SCENARIO_VALUE",
         `Unexpected SigningScenario Value '${value}'; expected 131 (kernel) or 12 (user mode).`));
+    }
+    for (const sub of ["TestSigners", "TestSigningSigners", "AppIDTags"] as const) {
+      if (ssObj[sub] !== undefined) {
+        diagnostics.push(diagWarn("UNSUPPORTED_SECTION",
+          `<${sub}> under SigningScenario ${value} is not modeled and will be omitted on regeneration.`, sub));
+      }
     }
 
     // ProductSigners > AllowedSigners > AllowedSigner[]
@@ -643,6 +689,50 @@ function parseSettingsField(root: Record<string, unknown>, valueName: string): s
     }
   }
   return undefined;
+}
+
+/**
+ * Parse every <Setting> element (any provider) into the generic settings
+ * model so the policy can be regenerated without losing them.
+ */
+function parseAllSettings(
+  root: Record<string, unknown>,
+  diagnostics: ParseDiagnostic[]
+): WdacSetting[] {
+  const settingsSection = root["Settings"] as Record<string, unknown> | undefined;
+  if (!settingsSection) return [];
+  const out: WdacSetting[] = [];
+  for (const s of asArray(settingsSection["Setting"] as unknown)) {
+    const sObj = s as Record<string, unknown>;
+    const provider = attr(sObj, "Provider") ?? "";
+    const key = attr(sObj, "Key") ?? "";
+    const valueName = attr(sObj, "ValueName") ?? "";
+    const valueEl = sObj["Value"] as Record<string, unknown> | undefined;
+    if (!provider || !key || !valueName || !valueEl) {
+      diagnostics.push(diagWarn("MALFORMED_SETTING",
+        `A <Setting> element is missing Provider/Key/ValueName/Value and was skipped.`, "Settings"));
+      continue;
+    }
+    let valueType: WdacSettingValueType | undefined;
+    let value: string | undefined;
+    for (const t of ["String", "Boolean", "DWord", "Binary"] as const) {
+      if (valueEl[t] !== undefined) {
+        valueType = t;
+        const v = valueEl[t];
+        value = typeof v === "object" && v !== null
+          ? String((v as Record<string, unknown>)["#text"] ?? "")
+          : String(v ?? "");
+        break;
+      }
+    }
+    if (!valueType || value === undefined) {
+      diagnostics.push(diagWarn("MALFORMED_SETTING",
+        `<Setting ${provider}/${key}/${valueName}> has no String/Boolean/DWord/Binary value and was skipped.`, "Settings"));
+      continue;
+    }
+    out.push({ provider, key, valueName, valueType, value });
+  }
+  return out;
 }
 
 function parseCiSigners(root: Record<string, unknown>): string[] {

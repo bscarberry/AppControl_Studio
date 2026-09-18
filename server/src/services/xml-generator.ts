@@ -21,8 +21,9 @@ import type {
   WdacPackageRule,
   WdacAttributeRule,
   WdacFileAttrib,
+  WdacSetting,
 } from "@appcontrol/shared";
-import { POLICY_RULE_OPTIONS } from "@appcontrol/shared";
+import { POLICY_RULE_OPTIONS, normalizeGuid } from "@appcontrol/shared";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -39,6 +40,20 @@ function escapeXml(str: string): string {
 
 function indent(level: number): string {
   return "  ".repeat(level);
+}
+
+/**
+ * Normalise a GUID for emission inside {braces}. cipolicy.xsd GuidType is
+ * strict (`\{hex8-hex4-hex4-hex4-hex12\}`), so braces supplied by callers
+ * (e.g. PolicyGuid values copied from CI events) must be stripped and empty
+ * values must never be emitted as `{}`.
+ */
+function guidForXml(value: string | undefined, what: string): string {
+  const g = normalizeGuid(value);
+  if (!g) {
+    throw new Error(`${what} is missing or not a valid GUID: '${value ?? ""}'`);
+  }
+  return g;
 }
 
 // ---------------------------------------------------------------------------
@@ -73,8 +88,11 @@ export function generateWdacXml(policy: WdacPolicy): string {
   if (isSinglePolicy) {
     // Legacy single-policy format uses the fixed reserved PolicyTypeID and
     // has no PolicyID / BasePolicyID elements.
-    const policyTypeId = policy.policyTypeId ?? "A244370E-44C9-4C06-B551-F6016E563076";
-    lines.push(`${indent(1)}<PolicyTypeID>{${escapeXml(policyTypeId)}}</PolicyTypeID>`);
+    const policyTypeId = guidForXml(
+      policy.policyTypeId ?? "A244370E-44C9-4C06-B551-F6016E563076",
+      "PolicyTypeID"
+    );
+    lines.push(`${indent(1)}<PolicyTypeID>{${policyTypeId}}</PolicyTypeID>`);
   } else {
     if (policy.policyType === "Supplemental" && !policy.basePolicyId) {
       throw new Error(
@@ -83,14 +101,18 @@ export function generateWdacXml(policy: WdacPolicy): string {
     }
     // Multiple-policy format requires both PolicyID and BasePolicyID; base
     // policies use a self-referential BasePolicyID (BasePolicyID == PolicyID).
-    const basePolicyId = policy.basePolicyId ?? policy.policyId;
-    lines.push(`${indent(1)}<PolicyID>{${escapeXml(policy.policyId)}}</PolicyID>`);
-    lines.push(`${indent(1)}<BasePolicyID>{${escapeXml(basePolicyId)}}</BasePolicyID>`);
+    const policyId = guidForXml(policy.policyId, "PolicyID");
+    const basePolicyId = guidForXml(policy.basePolicyId ?? policy.policyId, "BasePolicyID");
+    lines.push(`${indent(1)}<PolicyID>{${policyId}}</PolicyID>`);
+    lines.push(`${indent(1)}<BasePolicyID>{${basePolicyId}}</BasePolicyID>`);
   }
   // PlatformID is REQUIRED by cipolicy.xsd (minOccurs=1) — default to the
   // standard Windows platform GUID when the model doesn't carry one.
-  const platformId = policy.platformId ?? "2E07F7E4-194C-4D20-B7C9-6F44A6C5A234";
-  lines.push(`${indent(1)}<PlatformID>{${escapeXml(platformId)}}</PlatformID>`);
+  const platformId = guidForXml(
+    normalizeGuid(policy.platformId) ?? "2E07F7E4-194C-4D20-B7C9-6F44A6C5A234",
+    "PlatformID"
+  );
+  lines.push(`${indent(1)}<PlatformID>{${platformId}}</PlatformID>`);
 
   // Rules
   lines.push(`${indent(1)}<Rules>`);
@@ -155,21 +177,10 @@ export function generateWdacXml(policy: WdacPolicy): string {
   // HvciOptions — child element (not an attribute on SiPolicy)
   lines.push(`${indent(1)}<HvciOptions>${policy.hvciOptions ?? 0}</HvciOptions>`);
 
-  // Settings — PolicyInfo Name and Id
-  const settingValues: Array<[string, string]> = [
-    ["Name", policy.friendlyName ?? policy.policyId],
-    ["Id", policy.settingsId ?? policy.friendlyName ?? policy.policyId],
-  ];
+  // Settings — every preserved <Setting> plus PolicyInfo Name/Id, which are
+  // always emitted (friendlyName / settingsId win over stale preserved values).
   lines.push(`${indent(1)}<Settings>`);
-  for (const [valueName, value] of settingValues) {
-    lines.push(
-      `${indent(2)}<Setting Provider="PolicyInfo" Key="Information" ValueName="${valueName}">`
-    );
-    lines.push(`${indent(3)}<Value>`);
-    lines.push(`${indent(4)}<String>${escapeXml(value)}</String>`);
-    lines.push(`${indent(3)}</Value>`);
-    lines.push(`${indent(2)}</Setting>`);
-  }
+  lines.push(...generateSettings(policy));
   lines.push(`${indent(1)}</Settings>`);
 
   // SupplementalPolicySigners — signers authorized to sign supplemental
@@ -200,6 +211,40 @@ function generateRuleOptions(options: PolicyRuleOption[]): string[] {
     lines.push(`${indent(2)}<Rule>`);
     lines.push(`${indent(3)}<Option>${escapeXml(def.name)}</Option>`);
     lines.push(`${indent(2)}</Rule>`);
+  }
+  return lines;
+}
+
+function generateSettings(policy: WdacPolicy): string[] {
+  const isPolicyInfo = (s: WdacSetting, valueName: string) =>
+    s.provider === "PolicyInfo" && s.key === "Information" && s.valueName === valueName;
+
+  const preserved = (policy.settings ?? []).filter(
+    (s) => !isPolicyInfo(s, "Name") && !isPolicyInfo(s, "Id")
+  );
+  const preservedId = (policy.settings ?? []).find((s) => isPolicyInfo(s, "Id"))?.value;
+
+  const all: WdacSetting[] = [
+    ...preserved,
+    {
+      provider: "PolicyInfo", key: "Information", valueName: "Name", valueType: "String",
+      value: policy.friendlyName ?? policy.policyId,
+    },
+    {
+      provider: "PolicyInfo", key: "Information", valueName: "Id", valueType: "String",
+      value: policy.settingsId ?? preservedId ?? policy.friendlyName ?? policy.policyId,
+    },
+  ];
+
+  const lines: string[] = [];
+  for (const s of all) {
+    lines.push(
+      `${indent(2)}<Setting Provider="${escapeXml(s.provider)}" Key="${escapeXml(s.key)}" ValueName="${escapeXml(s.valueName)}">`
+    );
+    lines.push(`${indent(3)}<Value>`);
+    lines.push(`${indent(4)}<${s.valueType}>${escapeXml(s.value)}</${s.valueType}>`);
+    lines.push(`${indent(3)}</Value>`);
+    lines.push(`${indent(2)}</Setting>`);
   }
   return lines;
 }
@@ -292,8 +337,10 @@ function generateSigners(signers: WdacSignerRule[]): string[] {
   const lines: string[] = [];
   for (const signer of signers) {
     // Name before ID (cipolicy schema order)
+    const signTime = signer.signTimeAfter
+      ? ` SignTimeAfter="${escapeXml(signer.signTimeAfter)}"` : "";
     lines.push(
-      `${indent(2)}<Signer Name="${escapeXml(signer.name)}" ID="${escapeXml(signer.id)}">`
+      `${indent(2)}<Signer Name="${escapeXml(signer.name)}" ID="${escapeXml(signer.id)}"${signTime}>`
     );
 
     if (signer.certRoot) {
