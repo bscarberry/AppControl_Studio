@@ -12,6 +12,18 @@ import { semanticComparePolicies } from "../services/semantic-comparator.js";
 import { ingestAdvancedHunting } from "../services/advanced-hunting-ingestor.js";
 import { mergePolicies } from "../services/policy-merger.js";
 import { convertAppLockerToWdac } from "../services/applocker-converter.js";
+import { validatePolicy } from "../services/policy-validator.js";
+import { listTemplates, createFromTemplate } from "../services/policy-templates.js";
+import {
+  regenerateIds,
+  deduplicatePolicy,
+  clearAllRules,
+  setPolicyType,
+  applyRuleBundles,
+  OPTION_PRESETS,
+  applyOptionPreset,
+} from "@appcontrol/shared";
+import type { WdacPolicy, FileRuleBundle } from "@appcontrol/shared";
 import { validateXmlInput } from "../middleware/xml-validator.js";
 import { getAuditLogger, hashInput } from "../services/audit-logger.js";
 import { DEFAULT_CONFIG } from "../config/security-config.js";
@@ -400,6 +412,11 @@ policyRouter.post("/simulate", (req: Request, res: Response) => {
     fileVersion: z.string().max(64).optional(),
     filePath: z.string().max(4096).optional(),
     isKernelMode: z.boolean().optional(),
+    // Chain / EKU / package metadata produced by file inspection
+    certChainTbs: z.array(z.string().regex(/^[0-9a-fA-F]{32,128}$/)).max(32).optional(),
+    leafEkus: z.array(z.string().regex(/^[0-9.]{3,128}$/)).max(64).optional(),
+    wellknownRootId: z.string().regex(/^(0x)?[0-9a-fA-F]{1,2}$/).optional(),
+    packageFamilyName: z.string().max(512).optional(),
   });
   const schema = z.object({
     binary: binarySchema,
@@ -588,6 +605,156 @@ policyRouter.post("/cert-info", (req: Request, res: Response) => {
     });
   } catch (err) {
     res.status(422).json({ ok: false, error: { code: "CERT_PARSE_ERROR", message: (err as Error).message } });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Validate policy (schema + references + content + optional toolchain)
+// ---------------------------------------------------------------------------
+
+policyRouter.post("/validate", async (req: Request, res: Response) => {
+  const schema = z.object({
+    policy: z.record(z.unknown()).optional(),
+    xml: z.string().min(1).optional(),
+    useToolchain: z.boolean().optional(),
+  }).refine((v) => v.policy || v.xml, { message: "policy or xml is required" });
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ ok: false, error: { code: "VALIDATION", message: parsed.error.message } });
+    return;
+  }
+  const start = Date.now();
+  const logger = getAuditLogger();
+  try {
+    let policy: WdacPolicy;
+    const parseDiagnostics: unknown[] = [];
+    if (parsed.data.xml) {
+      if (rejectBadXml(parsed.data.xml, res)) return;
+      const r = parseWdacXml(parsed.data.xml, "validate.xml");
+      policy = r.policy;
+      parseDiagnostics.push(...r.diagnostics);
+    } else {
+      policy = parsed.data.policy as unknown as WdacPolicy;
+    }
+    const result = await validatePolicy(policy, { useToolchain: parsed.data.useToolchain });
+    logger.log("POLICY_VALIDATED", {
+      role: req.userRole,
+      outputSummary: `valid=${result.valid} errors=${result.summary.errors} warnings=${result.summary.warnings} toolchain=${result.toolchain.available}`,
+      durationMs: Date.now() - start,
+      succeeded: true,
+    });
+    res.json({ ok: true, data: { ...result, parseDiagnostics } });
+  } catch (err) {
+    res.status(422).json({ ok: false, error: { code: "VALIDATE_ERROR", message: (err as Error).message } });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Templates
+// ---------------------------------------------------------------------------
+
+policyRouter.get("/templates", async (_req: Request, res: Response) => {
+  try {
+    res.json({ ok: true, data: { templates: await listTemplates(), optionPresets: OPTION_PRESETS } });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: { code: "TEMPLATE_ERROR", message: (err as Error).message } });
+  }
+});
+
+policyRouter.post("/from-template", async (req: Request, res: Response) => {
+  const schema = z.object({
+    templateId: z.string().min(1),
+    policyName: z.string().min(1).max(256),
+    auditMode: z.boolean().optional(),
+    requireEvSigners: z.boolean().optional(),
+    enableScriptEnforcement: z.boolean().optional(),
+    testMode: z.boolean().optional(),
+    hvci: z.boolean().optional(),
+    allowSupplemental: z.boolean().optional(),
+    updateNoReboot: z.boolean().optional(),
+    basePolicyId: z.string().optional(),
+    versionEx: z.string().optional(),
+  });
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ ok: false, error: { code: "VALIDATION", message: parsed.error.message } });
+    return;
+  }
+  const start = Date.now();
+  try {
+    const result = await createFromTemplate(parsed.data as Parameters<typeof createFromTemplate>[0]);
+    getAuditLogger().log("POLICY_GENERATED", {
+      role: req.userRole,
+      outputSummary: `template=${result.templateId} options=${result.appliedOptions.join(",")}`,
+      durationMs: Date.now() - start,
+      succeeded: true,
+    });
+    res.json({ ok: true, data: result });
+  } catch (err) {
+    res.status(422).json({ ok: false, error: { code: "TEMPLATE_ERROR", message: (err as Error).message } });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Policy tools — regenerate IDs, deduplicate, clear, convert type, presets,
+// apply file-inspection rule bundles. All pure; returns the new model + XML.
+// ---------------------------------------------------------------------------
+
+policyRouter.post("/tools/:tool", (req: Request, res: Response) => {
+  const schema = z.object({
+    policy: z.record(z.unknown()),
+    policyType: z.enum(["Base", "Supplemental"]).optional(),
+    basePolicyId: z.string().optional(),
+    presetId: z.string().optional(),
+    bundles: z.array(z.record(z.unknown())).optional(),
+    scenarioOverride: z.union([z.literal(12), z.literal(131)]).optional(),
+  });
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ ok: false, error: { code: "VALIDATION", message: parsed.error.message } });
+    return;
+  }
+  const policy = parsed.data.policy as unknown as WdacPolicy;
+  try {
+    let result: WdacPolicy;
+    let summary: Record<string, unknown> = {};
+    switch (req.params.tool) {
+      case "regenerate-ids":
+        result = regenerateIds(policy);
+        break;
+      case "deduplicate": {
+        const d = deduplicatePolicy(policy);
+        result = d.policy;
+        summary = { removedFileRules: d.removedFileRules, removedSigners: d.removedSigners, removedEkus: d.removedEkus, droppedDanglingRefs: d.droppedDanglingRefs };
+        break;
+      }
+      case "clear-rules":
+        result = clearAllRules(policy);
+        break;
+      case "set-type":
+        if (!parsed.data.policyType) throw new Error("policyType is required");
+        result = setPolicyType(policy, parsed.data.policyType, parsed.data.basePolicyId);
+        break;
+      case "apply-preset": {
+        const preset = OPTION_PRESETS.find((p) => p.id === parsed.data.presetId);
+        if (!preset) throw new Error(`Unknown preset '${parsed.data.presetId}'`);
+        result = applyOptionPreset(policy, preset);
+        break;
+      }
+      case "apply-rules": {
+        const r = applyRuleBundles(policy, (parsed.data.bundles ?? []) as unknown as FileRuleBundle[], { scenarioOverride: parsed.data.scenarioOverride });
+        result = r.policy;
+        summary = { addedFileRules: r.addedFileRules, addedSigners: r.addedSigners, addedEkus: r.addedEkus, skipped: r.skipped };
+        break;
+      }
+      default:
+        res.status(404).json({ ok: false, error: { code: "UNKNOWN_TOOL", message: `Unknown tool '${req.params.tool}'` } });
+        return;
+    }
+    const xml = generateWdacXml(result);
+    res.json({ ok: true, data: { policy: result, xml, summary } });
+  } catch (err) {
+    res.status(422).json({ ok: false, error: { code: "TOOL_ERROR", message: (err as Error).message } });
   }
 });
 

@@ -19,6 +19,7 @@ import helmet from "helmet";
 import { join } from "path";
 import { policyRouter } from "./routes/policy.js";
 import { eventsRouter } from "./routes/events.js";
+import { filesRouter } from "./routes/files.js";
 import { securityRouter } from "./routes/security.js";
 import { errorHandler, requestSizeGuard } from "./middleware/error-handler.js";
 import { createRbacMiddleware } from "./middleware/rbac.js";
@@ -27,7 +28,10 @@ import { loadSecurityConfig } from "./config/security-config.js";
 import { initAuditLogger, getAuditLogger } from "./services/audit-logger.js";
 
 const PORT = parseInt(process.env.PORT ?? "3001", 10);
-const MAX_BODY = 50 * 1024 * 1024; // 50 MB
+const MAX_BODY = 50 * 1024 * 1024; // 50 MB (JSON / XML payloads)
+// Binary uploads for file inspection (multipart, streamed by multer, never
+// written to disk). Large installers and drivers routinely exceed 50 MB.
+const MAX_UPLOAD_BODY = 512 * 1024 * 1024; // 512 MB
 
 // Create app before async startup so it can be exported synchronously
 const app = express();
@@ -97,7 +101,10 @@ const app = express();
   // Body parsing — size limits enforced before JSON parsing
   // ---------------------------------------------------------------------------
 
-  app.use(requestSizeGuard(MAX_BODY));
+  app.use("/api/files", requestSizeGuard(MAX_UPLOAD_BODY));
+  app.use((req, res, next) =>
+    req.path.startsWith("/api/files") ? next() : requestSizeGuard(MAX_BODY)(req, res, next)
+  );
   app.use(express.json({ limit: "50mb" }));
   app.use(express.text({ limit: "50mb" }));
 
@@ -120,6 +127,7 @@ const app = express();
 
   app.use("/api/policy", policyRouter);
   app.use("/api/events", eventsRouter);
+  app.use("/api/files", filesRouter);
   app.use("/api/security", securityRouter);
 
   app.get("/api/health", (_req, res) => {

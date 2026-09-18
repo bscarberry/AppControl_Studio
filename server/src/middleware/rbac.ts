@@ -66,6 +66,16 @@ const ROUTE_PERMISSIONS: Record<string, Record<string, RbacRole>> = {
     "/api/policy/explain":           "viewer",
     "/api/events/parse":             "viewer",
     // Write / generation operations
+    "/api/policy/validate":          "viewer",
+    "/api/policy/simulate":          "viewer",
+    "/api/policy/merge":             "analyst",
+    "/api/policy/cert-info":         "viewer",
+    "/api/policy/convert-applocker": "analyst",
+    "/api/policy/from-template":     "analyst",
+    "/api/files/inspect":            "viewer",
+    "/api/files/rules":              "analyst",
+    "/api/files/cert-inspect":       "viewer",
+    "/api/events/parse-evtx":        "viewer",
     "/api/policy/generate":          "analyst",
     "/api/policy/from-events":       "analyst",
     "/api/policy/propose-rules":     "analyst",
@@ -76,6 +86,7 @@ const ROUTE_PERMISSIONS: Record<string, Record<string, RbacRole>> = {
   },
   GET: {
     "/api/policy/options":           "viewer",
+    "/api/policy/templates":         "viewer",
     "/api/health":                   "viewer",
     "/api/security/status":          "viewer",
     "/api/security/audit":           "admin",
@@ -83,7 +94,12 @@ const ROUTE_PERMISSIONS: Record<string, Record<string, RbacRole>> = {
 };
 
 export function requiredRoleFor(method: string, path: string): RbacRole | null {
-  return ROUTE_PERMISSIONS[method.toUpperCase()]?.[path] ?? null;
+  const table = ROUTE_PERMISSIONS[method.toUpperCase()];
+  if (!table) return null;
+  if (table[path] !== undefined) return table[path];
+  // Parameterised tool routes: every /api/policy/tools/* action mutates a policy model
+  if (path.startsWith("/api/policy/tools/")) return "analyst";
+  return null;
 }
 
 // ---------------------------------------------------------------------------

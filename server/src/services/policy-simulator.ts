@@ -4,15 +4,25 @@
  * Evaluates whether a binary would be allowed or blocked by a WDAC policy,
  * following the documented rule evaluation order exactly:
  *
- *   Phase 1 — Deny file rules   (hash → path → attribute)
+ *   Phase 1 — Deny file rules   (hash → package → path → attribute)
  *   Phase 2 — Deny signer rules (with optional FileAttrib scoping)
  *   Phase 3 — Allow signer rules (with optional FileAttrib scoping)
- *   Phase 4 — Allow file rules  (hash → attribute → path)
+ *   Phase 4 — Allow file rules  (hash → package → attribute → path)
  *   Phase 5 — Default deny
  *
  * Policy options that affect evaluation:
  *   Option 0 (UMCI)       — If disabled, user-mode binaries are not enforced.
  *   Option 3 (Audit Mode) — If enabled, all verdicts are "audit-only".
+ *
+ * Matching semantics validated against Microsoft example policies:
+ *   - FileName="*" (and other attribute wildcards) match any value — this is
+ *     how AllowAll.xml and the user-mode half of the recommended driver block
+ *     policy authorise everything.
+ *   - <CertRoot Type="TBS"> matches ANY certificate in the signing chain
+ *     (leaf, intermediate, or PCA), which is how Publisher / PcaCertificate /
+ *     LeafCertificate rules differ only by which TBS they pin.
+ *   - <CertEKU> constraints are enforced when the binary's leaf EKUs are known.
+ *   - Path rules have no effect in kernel mode (signing scenario 131).
  *
  * Reference:
  *   https://learn.microsoft.com/en-us/windows/security/application-security/
@@ -26,9 +36,12 @@ import type {
   WdacFileAttrib,
   WdacHashRule,
   WdacPathRule,
+  WdacPackageRule,
   WdacAttributeRule,
+  WdacEku,
   SigningScenarioValue,
 } from "@appcontrol/shared";
+import { ekuValueToOid } from "@appcontrol/shared";
 
 import type {
   BinaryMetadata,
@@ -58,6 +71,7 @@ export function simulateBinary(
   const signersById = new Map<string, WdacSignerRule>(
     policy.signers.map((s) => [s.id, s])
   );
+  const ekusById = new Map<string, WdacEku>(policy.ekus.map((e) => [e.id, e]));
 
   // -------------------------------------------------------------------------
   // Pre-flight: policy mode checks
@@ -140,7 +154,7 @@ export function simulateBinary(
       "No hash provided — hash-based deny and allow rules will be skipped."
     );
   }
-  if (!binary.signerName && !binary.rootCertTbs) {
+  if (!binary.signerName && !binary.rootCertTbs && !(binary.certChainTbs?.length)) {
     warnings.push(
       "No signing information provided — publisher/signer rules will be skipped."
     );
@@ -150,6 +164,11 @@ export function simulateBinary(
       "No file path provided — path-based rules will be skipped."
     );
   }
+  if (binary.isKernelMode && scenario.fileRuleRefs.some((id) => fileRulesById.get(id)?.kind === "path")) {
+    warnings.push(
+      "Kernel-mode evaluation: path rules referenced by scenario 131 have no effect (file path rules are user-mode only)."
+    );
+  }
 
   // Partition scenario's fileRuleRefs into deny and allow buckets
   const denyFileRules: WdacFileRule[] = [];
@@ -157,96 +176,47 @@ export function simulateBinary(
   for (const refId of scenario.fileRuleRefs) {
     const rule = fileRulesById.get(refId);
     if (!rule || rule.kind === "fileAttrib") continue;
-    const eff = (rule as WdacHashRule | WdacPathRule | WdacAttributeRule)
-      .effect;
-    if (eff === "Deny") denyFileRules.push(rule);
-    else if (eff === "Allow") allowFileRules.push(rule);
+    if (rule.effect === "Deny") denyFileRules.push(rule);
+    else if (rule.effect === "Allow") allowFileRules.push(rule);
   }
 
-  // -------------------------------------------------------------------------
-  // Phase 1a — Deny hash rules
-  // -------------------------------------------------------------------------
-
-  for (const rule of denyFileRules.filter((r) => r.kind === "hash")) {
-    const m = matchHash(rule as WdacHashRule, binary);
-    pushStep(steps, {
-      phase: "deny-hash",
-      ruleId: rule.id,
-      ruleName: rule.friendlyName ?? rule.id,
-      ruleType: "deny-hash",
-      outcome: stepOutcome(m),
-      detail: m.detail,
-    });
-    if (m.matched) {
-      return finalResult(
-        "blocked",
-        rule.id,
-        rule.friendlyName ?? rule.id,
-        "hash",
-        policyMode,
-        scenarioValue as 131 | 12,
-        steps,
-        warnings,
-        `Binary explicitly denied by hash rule "${rule.friendlyName ?? rule.id}": ${m.detail}`
-      );
-    }
-  }
+  const ctx: MatchContext = { binary, fileRulesById, ekusById, isKernelMode: !!binary.isKernelMode };
 
   // -------------------------------------------------------------------------
-  // Phase 1b — Deny path rules
+  // Phase 1 — Deny file rules (hash → package → path → attribute)
   // -------------------------------------------------------------------------
 
-  for (const rule of denyFileRules.filter((r) => r.kind === "path")) {
-    const m = matchPath(rule as WdacPathRule, binary);
-    pushStep(steps, {
-      phase: "deny-path",
-      ruleId: rule.id,
-      ruleName: rule.friendlyName ?? rule.id,
-      ruleType: "deny-path",
-      outcome: stepOutcome(m),
-      detail: m.detail,
-    });
-    if (m.matched) {
-      return finalResult(
-        "blocked",
-        rule.id,
-        rule.friendlyName ?? rule.id,
-        "path",
-        policyMode,
-        scenarioValue as 131 | 12,
-        steps,
-        warnings,
-        `Binary explicitly denied by path rule "${rule.friendlyName ?? rule.id}": ${m.detail}`
-      );
-    }
-  }
+  const denyOrder: Array<{ kind: WdacFileRule["kind"]; phase: EvalPhase; ruleType: SimRuleType; matchedBy: MatchedBy; label: string }> = [
+    { kind: "hash", phase: "deny-hash", ruleType: "deny-hash", matchedBy: "hash", label: "hash" },
+    { kind: "package", phase: "deny-package", ruleType: "deny-package", matchedBy: "package", label: "package" },
+    { kind: "path", phase: "deny-path", ruleType: "deny-path", matchedBy: "path", label: "path" },
+    { kind: "attribute", phase: "deny-attribute", ruleType: "deny-attribute", matchedBy: "attribute", label: "attribute" },
+  ];
 
-  // -------------------------------------------------------------------------
-  // Phase 1c — Deny attribute rules
-  // -------------------------------------------------------------------------
-
-  for (const rule of denyFileRules.filter((r) => r.kind === "attribute")) {
-    const m = matchAttributes(rule as WdacAttributeRule, binary);
-    pushStep(steps, {
-      phase: "deny-attribute",
-      ruleId: rule.id,
-      ruleName: rule.friendlyName ?? rule.id,
-      ruleType: "deny-attribute",
-      outcome: stepOutcome(m),
-      detail: m.detail,
-    });
-    if (m.matched) {
-      return finalResult(
-        "blocked",
-        rule.id,
-        rule.friendlyName ?? rule.id,
-        "attribute",
-        policyMode,
-        scenarioValue as 131 | 12,
-        steps,
-        warnings,
-        `Binary explicitly denied by attribute rule "${rule.friendlyName ?? rule.id}": ${m.detail}`
-      );
+  for (const spec of denyOrder) {
+    for (const rule of denyFileRules.filter((r) => r.kind === spec.kind)) {
+      const m = matchFileRule(rule, ctx);
+      pushStep(steps, {
+        phase: spec.phase,
+        ruleId: rule.id,
+        ruleName: rule.friendlyName ?? rule.id,
+        ruleType: spec.ruleType,
+        outcome: stepOutcome(m),
+        detail: m.detail,
+      });
+      if (m.matched) {
+        return finalResult(
+          "blocked",
+          rule.id,
+          rule.friendlyName ?? rule.id,
+          spec.matchedBy,
+          policyMode,
+          scenarioValue as 131 | 12,
+          steps,
+          warnings,
+          `Binary explicitly denied by ${spec.label} rule "${rule.friendlyName ?? rule.id}": ${m.detail}`
+        );
+      }
     }
   }
 
@@ -258,7 +228,7 @@ export function simulateBinary(
     const signer = signersById.get(deniedEntry.signerId);
     if (!signer) continue;
 
-    const m = matchSigner(signer, binary, fileRulesById);
+    const m = matchSigner(signer, ctx);
     const ruleType: SimRuleType = signer.fileAttribRefs?.length
       ? "deny-publisher-scoped"
       : "deny-publisher";
@@ -267,8 +237,7 @@ export function simulateBinary(
       // exceptAllowRuleIds — deny is overridden if binary also matches one of these allow rules
       const excepted = matchesAnyFileRule(
         deniedEntry.exceptAllowRuleIds ?? [],
-        binary,
-        fileRulesById
+        ctx
       );
       pushStep(steps, {
         phase: "deny-publisher",
@@ -313,7 +282,7 @@ export function simulateBinary(
     const signer = signersById.get(allowedEntry.signerId);
     if (!signer) continue;
 
-    const m = matchSigner(signer, binary, fileRulesById);
+    const m = matchSigner(signer, ctx);
     const isScoped = (signer.fileAttribRefs?.length ?? 0) > 0;
     const ruleType: SimRuleType = isScoped
       ? "allow-publisher-scoped"
@@ -326,8 +295,7 @@ export function simulateBinary(
       // exceptDenyRuleIds — allow is overridden if binary also matches one of these deny rules
       const excepted = matchesAnyFileRule(
         allowedEntry.exceptDenyRuleIds ?? [],
-        binary,
-        fileRulesById
+        ctx
       );
       pushStep(steps, {
         phase,
@@ -365,89 +333,40 @@ export function simulateBinary(
   }
 
   // -------------------------------------------------------------------------
-  // Phase 4a — Allow hash rules (most specific file rule)
+  // Phase 4 — Allow file rules (hash → package → attribute → path)
   // -------------------------------------------------------------------------
 
-  for (const rule of allowFileRules.filter((r) => r.kind === "hash")) {
-    const m = matchHash(rule as WdacHashRule, binary);
-    pushStep(steps, {
-      phase: "allow-hash",
-      ruleId: rule.id,
-      ruleName: rule.friendlyName ?? rule.id,
-      ruleType: "allow-hash",
-      outcome: stepOutcome(m),
-      detail: m.detail,
-    });
-    if (m.matched) {
-      return finalResult(
-        "allowed",
-        rule.id,
-        rule.friendlyName ?? rule.id,
-        "hash",
-        policyMode,
-        scenarioValue as 131 | 12,
-        steps,
-        warnings,
-        `Binary explicitly allowed by hash rule "${rule.friendlyName ?? rule.id}": ${m.detail}`
-      );
-    }
-  }
+  const allowOrder: Array<{ kind: WdacFileRule["kind"]; phase: EvalPhase; ruleType: SimRuleType; matchedBy: MatchedBy; label: string }> = [
+    { kind: "hash", phase: "allow-hash", ruleType: "allow-hash", matchedBy: "hash", label: "hash" },
+    { kind: "package", phase: "allow-package", ruleType: "allow-package", matchedBy: "package", label: "package" },
+    { kind: "attribute", phase: "allow-attribute", ruleType: "allow-attribute", matchedBy: "attribute", label: "attribute" },
+    { kind: "path", phase: "allow-path", ruleType: "allow-path", matchedBy: "path", label: "path" },
+  ];
 
-  // -------------------------------------------------------------------------
-  // Phase 4b — Allow attribute rules
-  // -------------------------------------------------------------------------
-
-  for (const rule of allowFileRules.filter((r) => r.kind === "attribute")) {
-    const m = matchAttributes(rule as WdacAttributeRule, binary);
-    pushStep(steps, {
-      phase: "allow-attribute",
-      ruleId: rule.id,
-      ruleName: rule.friendlyName ?? rule.id,
-      ruleType: "allow-attribute",
-      outcome: stepOutcome(m),
-      detail: m.detail,
-    });
-    if (m.matched) {
-      return finalResult(
-        "allowed",
-        rule.id,
-        rule.friendlyName ?? rule.id,
-        "attribute",
-        policyMode,
-        scenarioValue as 131 | 12,
-        steps,
-        warnings,
-        `Binary explicitly allowed by attribute rule "${rule.friendlyName ?? rule.id}": ${m.detail}`
-      );
-    }
-  }
-
-  // -------------------------------------------------------------------------
-  // Phase 4c — Allow path rules (broadest file rule)
-  // -------------------------------------------------------------------------
-
-  for (const rule of allowFileRules.filter((r) => r.kind === "path")) {
-    const m = matchPath(rule as WdacPathRule, binary);
-    pushStep(steps, {
-      phase: "allow-path",
-      ruleId: rule.id,
-      ruleName: rule.friendlyName ?? rule.id,
-      ruleType: "allow-path",
-      outcome: stepOutcome(m),
-      detail: m.detail,
-    });
-    if (m.matched) {
-      return finalResult(
-        "allowed",
-        rule.id,
-        rule.friendlyName ?? rule.id,
-        "path",
-        policyMode,
-        scenarioValue as 131 | 12,
-        steps,
-        warnings,
-        `Binary explicitly allowed by path rule "${rule.friendlyName ?? rule.id}": ${m.detail}`
-      );
+  for (const spec of allowOrder) {
+    for (const rule of allowFileRules.filter((r) => r.kind === spec.kind)) {
+      const m = matchFileRule(rule, ctx);
+      pushStep(steps, {
+        phase: spec.phase,
+        ruleId: rule.id,
+        ruleName: rule.friendlyName ?? rule.id,
+        ruleType: spec.ruleType,
+        outcome: stepOutcome(m),
+        detail: m.detail,
+      });
+      if (m.matched) {
+        return finalResult(
+          "allowed",
+          rule.id,
+          rule.friendlyName ?? rule.id,
+          spec.matchedBy,
+          policyMode,
+          scenarioValue as 131 | 12,
+          steps,
+          warnings,
+          `Binary explicitly allowed by ${spec.label} rule "${rule.friendlyName ?? rule.id}": ${m.detail}`
+        );
+      }
     }
   }
 
@@ -477,14 +396,35 @@ export function simulateBinary(
 }
 
 // ---------------------------------------------------------------------------
-// Rule matching — hash
+// Match context + dispatch
 // ---------------------------------------------------------------------------
+
+interface MatchContext {
+  binary: BinaryMetadata;
+  fileRulesById: Map<string, WdacFileRule>;
+  ekusById: Map<string, WdacEku>;
+  isKernelMode: boolean;
+}
 
 interface MatchOutcome {
   matched: boolean;
   skipped?: boolean;
   detail: string;
 }
+
+function matchFileRule(rule: WdacFileRule, ctx: MatchContext): MatchOutcome {
+  switch (rule.kind) {
+    case "hash": return matchHash(rule, ctx.binary);
+    case "path": return matchPath(rule, ctx);
+    case "package": return matchPackage(rule, ctx.binary);
+    case "attribute": return matchAttributes(rule, ctx.binary);
+    case "fileAttrib": return { matched: false, skipped: true, detail: "FileAttrib descriptors are not evaluated directly." };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Rule matching — hash
+// ---------------------------------------------------------------------------
 
 function matchHash(rule: WdacHashRule, binary: BinaryMetadata): MatchOutcome {
   const isSha256 =
@@ -513,6 +453,35 @@ function matchHash(rule: WdacHashRule, binary: BinaryMetadata): MatchOutcome {
 }
 
 // ---------------------------------------------------------------------------
+// Rule matching — package family name
+// ---------------------------------------------------------------------------
+
+function matchPackage(rule: WdacPackageRule, binary: BinaryMetadata): MatchOutcome {
+  if (!binary.packageFamilyName) {
+    return {
+      matched: false,
+      skipped: true,
+      detail: "Package family name not provided for binary — rule skipped.",
+    };
+  }
+  const pfnOk = ci(binary.packageFamilyName) === ci(rule.packageFamilyName);
+  if (!pfnOk) {
+    return {
+      matched: false,
+      detail: `PackageFamilyName "${rule.packageFamilyName}": ✗ (binary: "${binary.packageFamilyName}")`,
+    };
+  }
+  if (rule.packageVersion && binary.fileVersion) {
+    const ok = compareVersions(binary.fileVersion, rule.packageVersion) >= 0;
+    return {
+      matched: ok,
+      detail: `PackageFamilyName "${rule.packageFamilyName}": ✓; PackageVersion >= ${rule.packageVersion}: ${ok ? "✓" : `✗ (binary: "${binary.fileVersion}")`}`,
+    };
+  }
+  return { matched: true, detail: `PackageFamilyName "${rule.packageFamilyName}": ✓` };
+}
+
+// ---------------------------------------------------------------------------
 // Rule matching — path
 // ---------------------------------------------------------------------------
 
@@ -523,9 +492,6 @@ function matchHash(rule: WdacHashRule, binary: BinaryMetadata): MatchOutcome {
  * (cipolicy.xsd, WDAC Policy Wizard Helper.cs). Environment variables such as
  * %PROGRAMFILES% and %COMMONPROGRAMFILES% are NOT expanded by the WDAC kernel
  * driver — policies using them would treat the macro as a literal path string.
- *
- * Reference: App Control for Business path rule documentation and WDAC Toolkit
- * Helper.cs path validation logic.
  */
 const WDAC_MACROS: [string, string][] = [
   ["%WINDIR%", "C:\\Windows"],
@@ -558,7 +524,15 @@ function pathPatternToRegex(pattern: string): RegExp {
   return new RegExp(`^${escaped}$`, "i");
 }
 
-function matchPath(rule: WdacPathRule, binary: BinaryMetadata): MatchOutcome {
+function matchPath(rule: WdacPathRule, ctx: MatchContext): MatchOutcome {
+  const { binary } = ctx;
+  if (ctx.isKernelMode) {
+    return {
+      matched: false,
+      skipped: true,
+      detail: "File path rules are user-mode only — no effect in kernel-mode scenario 131.",
+    };
+  }
   if (!binary.filePath) {
     return {
       matched: false,
@@ -569,13 +543,23 @@ function matchPath(rule: WdacPathRule, binary: BinaryMetadata): MatchOutcome {
 
   const normalised = binary.filePath.replace(/\//g, "\\");
   const re = pathPatternToRegex(rule.filePath);
-  const matched = re.test(normalised);
-  return {
-    matched,
-    detail: matched
+  let matched = re.test(normalised);
+  const checks: string[] = [
+    matched
       ? `Path "${binary.filePath}" matches pattern "${rule.filePath}".`
       : `Path "${binary.filePath}" does not match pattern "${rule.filePath}".`,
-  };
+  ];
+  if (matched && rule.minimumFileVersion) {
+    const ok = compareVersions(binary.fileVersion ?? "0.0.0.0", rule.minimumFileVersion) >= 0;
+    checks.push(`FileVersion >= ${rule.minimumFileVersion}: ${ok ? "✓" : `✗ (binary: "${binary.fileVersion ?? "—"}")`}`);
+    matched = matched && ok;
+  }
+  if (matched && rule.maximumFileVersion) {
+    const ok = compareVersions(binary.fileVersion ?? "9999.9999.9999.9999", rule.maximumFileVersion) <= 0;
+    checks.push(`FileVersion <= ${rule.maximumFileVersion}: ${ok ? "✓" : `✗ (binary: "${binary.fileVersion ?? "—"}")`}`);
+    matched = matched && ok;
+  }
+  return { matched, detail: checks.join("; ") };
 }
 
 // ---------------------------------------------------------------------------
@@ -591,6 +575,17 @@ interface AttribLike {
   maximumFileVersion?: string;
 }
 
+/**
+ * WDAC attribute comparison: case-insensitive exact match, where "*" in the
+ * rule matches any value (including a missing one). AllowAll.xml relies on
+ * FileName="*"; SignedVersion rules use FileName="*" + MinimumFileVersion.
+ */
+function attributeEquals(ruleVal: string, binaryVal: string | undefined): boolean {
+  if (ruleVal === "*") return true;
+  if (binaryVal === undefined) return false;
+  return ci(binaryVal) === ci(ruleVal);
+}
+
 function matchAttributes(rule: AttribLike, binary: BinaryMetadata): MatchOutcome {
   const checks: string[] = [];
   let hasConstraint = false;
@@ -598,8 +593,12 @@ function matchAttributes(rule: AttribLike, binary: BinaryMetadata): MatchOutcome
   function check(label: string, ruleVal: string | undefined, binaryVal: string | undefined): boolean {
     if (!ruleVal) return true; // no constraint → always pass
     hasConstraint = true;
-    const ok = ci(binaryVal) === ci(ruleVal);
-    checks.push(`${label} "${ruleVal}": ${ok ? "✓" : `✗ (binary: "${binaryVal ?? "—"}")`}`);
+    const ok = attributeEquals(ruleVal, binaryVal);
+    checks.push(
+      ruleVal === "*"
+        ? `${label} "*": ✓ (wildcard)`
+        : `${label} "${ruleVal}": ${ok ? "✓" : `✗ (binary: "${binaryVal ?? "—"}")`}`
+    );
     return ok;
   }
 
@@ -641,39 +640,58 @@ function matchAttributes(rule: AttribLike, binary: BinaryMetadata): MatchOutcome
 // Rule matching — signer (publisher)
 // ---------------------------------------------------------------------------
 
-function matchSigner(
-  signer: WdacSignerRule,
-  binary: BinaryMetadata,
-  fileRulesById: Map<string, WdacFileRule>
-): MatchOutcome {
+function normalizeWellknown(v: string | undefined): string | undefined {
+  if (!v) return undefined;
+  const hex = v.replace(/^0x/i, "").toUpperCase();
+  return hex.length === 1 ? `0${hex}` : hex;
+}
+
+function matchSigner(signer: WdacSignerRule, ctx: MatchContext): MatchOutcome {
+  const { binary, fileRulesById, ekusById } = ctx;
   const checks: string[] = [];
+  const chainTbs = [
+    ...(binary.rootCertTbs ? [binary.rootCertTbs] : []),
+    ...(binary.certChainTbs ?? []),
+  ].map(ci);
+  const hasSigningInfo = !!binary.signerName || chainTbs.length > 0;
 
   // --- certRoot ---
   if (signer.certRoot) {
     if (signer.certRoot.type === "TBS") {
-      if (!binary.rootCertTbs) {
+      if (chainTbs.length === 0) {
         return {
           matched: false,
           skipped: true,
-          detail: `Signer "${signer.name}": certRoot TBS requires root certificate hash — not provided for binary.`,
+          detail: `Signer "${signer.name}": certRoot TBS requires the binary's certificate chain TBS hashes — not provided.`,
         };
       }
-      if (ci(binary.rootCertTbs) !== ci(signer.certRoot.value)) {
-        checks.push(`certRoot TBS ${signer.certRoot.value.slice(0, 12)}…: ✗`);
+      const want = ci(signer.certRoot.value);
+      const pos = chainTbs.indexOf(want);
+      if (pos < 0) {
+        checks.push(`certRoot TBS ${signer.certRoot.value.slice(0, 12)}…: ✗ (no chain certificate matches)`);
         return { matched: false, detail: `Signer "${signer.name}": ${checks.join("; ")}` };
       }
-      checks.push(`certRoot TBS: ✓`);
+      checks.push(`certRoot TBS: ✓ (chain certificate #${pos})`);
     } else if (signer.certRoot.type === "Wellknown") {
-      // Well-known root IDs (e.g. "1" = Windows Component root) cannot be
-      // validated from metadata alone; treat as a soft match if binary is signed.
-      if (!binary.signerName && !binary.rootCertTbs) {
+      const want = normalizeWellknown(signer.certRoot.value);
+      const have = normalizeWellknown(binary.wellknownRootId);
+      if (have) {
+        if (have !== want) {
+          checks.push(`certRoot Wellknown ${want}: ✗ (binary root is ${have})`);
+          return { matched: false, detail: `Signer "${signer.name}": ${checks.join("; ")}` };
+        }
+        checks.push(`certRoot Wellknown ${want}: ✓`);
+      } else if (!hasSigningInfo) {
         return {
           matched: false,
           skipped: true,
-          detail: `Signer "${signer.name}": certRoot Wellknown ID ${signer.certRoot.value} — binary has no signing info to verify against.`,
+          detail: `Signer "${signer.name}": certRoot Wellknown ID ${want} — binary has no signing info to verify against.`,
         };
+      } else {
+        // Well-known root IDs cannot be validated without the chain's root
+        // identity; treat as a soft match for a signed binary.
+        checks.push(`certRoot Wellknown ID ${want}: assumed ✓ (root identity not provided)`);
       }
-      checks.push(`certRoot Wellknown ID ${signer.certRoot.value}: assumed ✓ (cannot verify from metadata)`);
     }
   }
 
@@ -715,10 +733,33 @@ function matchSigner(
     checks.push(`certIssuer "${signer.certIssuer}": ✓`);
   }
 
+  // --- certEKU ---
+  if (signer.certEKU && signer.certEKU.length > 0) {
+    const required = signer.certEKU.map((e) => {
+      const eku = ekusById.get(e.ekuId);
+      return { id: e.ekuId, oid: eku ? ekuValueToOid(eku.value) : undefined };
+    });
+    if (binary.leafEkus && binary.leafEkus.length > 0) {
+      const have = new Set(binary.leafEkus);
+      const missing = required.filter((r) => !r.oid || !have.has(r.oid));
+      if (missing.length > 0) {
+        checks.push(
+          `CertEKU ${missing.map((m) => m.oid ?? m.id).join(", ")}: ✗ (leaf certificate lacks the EKU)`
+        );
+        return { matched: false, detail: `Signer "${signer.name}": ${checks.join("; ")}` };
+      }
+      checks.push(`CertEKU ${required.map((r) => r.oid ?? r.id).join(", ")}: ✓`);
+    } else {
+      checks.push(
+        `CertEKU ${required.map((r) => r.oid ?? r.id).join(", ")}: not verified (binary EKUs unknown)`
+      );
+    }
+  }
+
   // Guard: if the signer rule has no cert constraints and the binary has no
   // signing info at all, we cannot assert a match.
   if (!signer.certRoot && !signer.certPublisher && !signer.certIssuer) {
-    if (!binary.signerName && !binary.rootCertTbs) {
+    if (!hasSigningInfo) {
       return {
         matched: false,
         skipped: true,
@@ -770,19 +811,11 @@ function matchSigner(
 // Exception check — does the binary match any of the given exception rule IDs?
 // ---------------------------------------------------------------------------
 
-function matchesAnyFileRule(
-  ruleIds: string[],
-  binary: BinaryMetadata,
-  fileRulesById: Map<string, WdacFileRule>
-): boolean {
+function matchesAnyFileRule(ruleIds: string[], ctx: MatchContext): boolean {
   for (const id of ruleIds) {
-    const rule = fileRulesById.get(id);
+    const rule = ctx.fileRulesById.get(id);
     if (!rule || rule.kind === "fileAttrib") continue;
-    let m: MatchOutcome;
-    if (rule.kind === "hash") m = matchHash(rule as WdacHashRule, binary);
-    else if (rule.kind === "path") m = matchPath(rule as WdacPathRule, binary);
-    else m = matchAttributes(rule as WdacAttributeRule, binary);
-    if (m.matched) return true;
+    if (matchFileRule(rule, ctx).matched) return true;
   }
   return false;
 }
@@ -871,3 +904,7 @@ function compareVersions(a: string, b: string): number {
   }
   return 0;
 }
+
+// Re-exported for the file inspector / tests
+export { compareVersions as compareFileVersions };
+export type { WdacAttributeRule as _WdacAttributeRuleRef };

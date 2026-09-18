@@ -56,6 +56,31 @@ export interface BinaryMetadata {
    */
   issuerName?: string;
 
+  /**
+   * TBS hashes (hex) of EVERY certificate in the signing chain, leaf first.
+   * A signer rule with <CertRoot Type="TBS"> matches when its value equals
+   * any chain member — this is how WDAC evaluates PcaCertificate / Publisher
+   * / LeafCertificate rules. Populated automatically by file inspection.
+   */
+  certChainTbs?: string[];
+
+  /**
+   * Extended key usage OIDs (dotted form) present on the leaf certificate.
+   * When provided, signer rules carrying <CertEKU> require every referenced
+   * EKU to be present; when absent, EKU constraints are noted but not enforced.
+   */
+  leafEkus?: string[];
+
+  /**
+   * Hex ID of the Microsoft well-known root the chain terminates at (e.g. "06").
+   * When provided, <CertRoot Type="Wellknown"> rules are matched exactly
+   * instead of being assumed.
+   */
+  wellknownRootId?: string;
+
+  /** Package family name for MSIX/AppX packaged apps (matches PackageFamilyName rules). */
+  packageFamilyName?: string;
+
   // ---- PE version resource attributes (used by FileAttrib scoping) ----
 
   /** OriginalFilename from the PE version resource. */
@@ -107,11 +132,13 @@ export type EvalPhase =
   | "deny-publisher"         // Explicit deny by signer/publisher rule
   | "deny-path"              // Explicit deny by file-path pattern
   | "deny-attribute"         // Explicit deny by file version-resource attributes
+  | "deny-package"           // Explicit deny by PackageFamilyName
   | "allow-publisher"        // Unscoped publisher allow rule
   | "allow-publisher-scoped" // Publisher allow rule + FileAttrib scope check
   | "allow-hash"             // Allow by SHA-256 or SHA-1 hash
   | "allow-attribute"        // Allow by file version-resource attributes
   | "allow-path"             // Allow by file-path pattern (broadest)
+  | "allow-package"          // Allow by PackageFamilyName
   | "default";               // No rule matched — implicit policy default
 
 /** What happened at a single evaluation step. */
@@ -132,7 +159,9 @@ export type SimRuleType =
   | "deny-publisher-scoped"
   | "deny-path"
   | "deny-attribute"
+  | "deny-package"
   | "allow-hash"
+  | "allow-package"
   | "allow-publisher"
   | "allow-publisher-scoped"
   | "allow-path"
@@ -190,6 +219,7 @@ export type MatchedBy =
   | "publisher-scoped"
   | "path"
   | "attribute"
+  | "package"
   | "default"
   | "umci-disabled"
   | "no-scenario";

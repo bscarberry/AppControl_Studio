@@ -3,7 +3,7 @@
  */
 
 import { create } from "zustand";
-import type { WdacPolicy, ParsedCiEvent, PolicyComparisonResult, ProposedPolicyChanges } from "@appcontrol/shared";
+import type { WdacPolicy, ParsedCiEvent, PolicyComparisonResult, ProposedPolicyChanges, InspectedFile } from "@appcontrol/shared";
 
 export interface PolicySession {
   id: string;
@@ -27,6 +27,9 @@ interface AppState {
   // Rule engine proposals
   proposedChanges: ProposedPolicyChanges | null;
 
+  // File inspection results (persist across page navigation)
+  inspectedFiles: InspectedFile[];
+
   // Actions
   addSession: (session: PolicySession) => void;
   removeSession: (id: string) => void;
@@ -36,6 +39,7 @@ interface AppState {
   setImportedEvents: (events: ParsedCiEvent[]) => void;
   clearEvents: () => void;
   setProposedChanges: (changes: ProposedPolicyChanges | null) => void;
+  setInspectedFiles: (files: InspectedFile[]) => void;
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -44,6 +48,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   comparison: null,
   importedEvents: [],
   proposedChanges: null,
+  inspectedFiles: [],
 
   addSession: (session) =>
     set((state) => {
@@ -74,6 +79,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   clearEvents: () => set({ importedEvents: [] }),
 
   setProposedChanges: (changes) => set({ proposedChanges: changes }),
+
+  setInspectedFiles: (files) => set({ inspectedFiles: files }),
 }));
 
 // Selector helpers

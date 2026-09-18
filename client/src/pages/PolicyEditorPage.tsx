@@ -1,11 +1,13 @@
 import { useState, useCallback } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { Upload, FileText, Settings, List, Key, RefreshCw, RotateCcw, Code, X } from "lucide-react";
+import { Upload, FileText, Settings, List, Key, RefreshCw, RotateCcw, Code, X, Wrench, ChevronDown } from "lucide-react";
 import { v4 as uuidv4 } from "uuid";
 import clsx from "clsx";
 import { policyApi } from "../lib/api.ts";
 import { useAppStore, useActiveSession } from "../store/index.ts";
 import { deleteFileRule, deleteSigner } from "../lib/policy-mutations.ts";
+import { PolicyToolsMenu } from "../components/policy/PolicyToolsMenu.tsx";
+import { PolicyIdentityEditor } from "../components/policy/PolicyIdentityEditor.tsx";
 import { Header } from "../components/layout/Header.tsx";
 import { FileDropZone } from "../components/common/FileDropZone.tsx";
 import { EmptyState } from "../components/common/EmptyState.tsx";
@@ -18,10 +20,11 @@ import { AddFileRuleDialog } from "../components/policy/AddFileRuleDialog.tsx";
 import { AddSignerDialog } from "../components/policy/AddSignerDialog.tsx";
 import type { WdacPolicy, ExplainPolicyResponse } from "@appcontrol/shared";
 
-type TabId = "overview" | "options" | "file-rules" | "signers" | "xml";
+type TabId = "overview" | "identity" | "options" | "file-rules" | "signers" | "xml";
 
 const TABS: { id: TabId; label: string; icon: React.ReactNode }[] = [
   { id: "overview", label: "Overview", icon: <FileText size={14} /> },
+  { id: "identity", label: "Details", icon: <Wrench size={14} /> },
   { id: "options", label: "Options", icon: <Settings size={14} /> },
   { id: "file-rules", label: "File Rules", icon: <List size={14} /> },
   { id: "signers", label: "Signers", icon: <Key size={14} /> },
@@ -175,6 +178,11 @@ export function PolicyEditorPage() {
                   Reload File
                 </button>
               )}
+              <PolicyToolsMenu
+                policy={activeSession.policy}
+                onChange={(p, msg) => { updateSessionPolicy(activeSession.id, p); setStatus({ type: "success", message: msg }); }}
+                onError={(m) => setStatus({ type: "error", message: m })}
+              />
               <button
                 className="btn-ghost"
                 onClick={() => explainMutation.mutate(activeSession.policy)}
@@ -257,6 +265,10 @@ export function PolicyEditorPage() {
           <div className="flex-1 overflow-auto p-6">
             {activeTab === "overview" && (
               <PolicyOverview policy={activeSession.policy} explanation={explanation} />
+            )}
+
+            {activeTab === "identity" && (
+              <PolicyIdentityEditor policy={activeSession.policy} onChange={handlePolicyChange} />
             )}
 
             {activeTab === "options" && (

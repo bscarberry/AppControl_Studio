@@ -23,6 +23,17 @@ import type {
   BinaryMetadata,
   WdacPolicy,
   ParsedCiEvent,
+  InspectedFile,
+  InspectedCertificate,
+  RuleLevel,
+  FileRuleBundle,
+  PolicyValidationResult,
+  ParseDiagnostic,
+  PolicyTemplateInfo,
+  OptionPreset,
+  CreateFromTemplateRequest,
+  CreateFromTemplateResponse,
+  SigningScenarioValue,
 } from "@appcontrol/shared";
 import { getAccessToken } from "./msal-config.ts";
 
@@ -43,6 +54,13 @@ async function post<T>(path: string, body: unknown): Promise<T> {
   if (!json.ok) {
     throw new Error(json.error.message ?? "Request failed");
   }
+  return json.data;
+}
+
+async function postForm<T>(path: string, form: FormData): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, { method: "POST", headers: authHeaders(), body: form });
+  const json = (await res.json()) as ApiResponse<T>;
+  if (!json.ok) throw new Error(json.error.message ?? "Request failed");
   return json.data;
 }
 
@@ -114,6 +132,52 @@ export const policyApi = {
   /** Convert an AppLocker XML policy to WDAC rules */
   convertAppLocker: (appLockerXml: string, includeDenyRules = false) =>
     post<ConvertAppLockerResponse>("/policy/convert-applocker", { appLockerXml, includeDenyRules }),
+
+  /** Validate a policy model (or raw XML) — schema, references, content, optional ConvertFrom-CIPolicy */
+  validate: (input: { policy?: WdacPolicy; xml?: string; useToolchain?: boolean }) =>
+    post<PolicyValidationResult & { parseDiagnostics: ParseDiagnostic[] }>("/policy/validate", input),
+
+  /** List base / supplemental / deny templates and option presets */
+  templates: () =>
+    get<{ templates: PolicyTemplateInfo[]; optionPresets: OptionPreset[] }>("/policy/templates"),
+
+  /** Create a new policy from a template */
+  fromTemplate: (req: CreateFromTemplateRequest) =>
+    post<CreateFromTemplateResponse>("/policy/from-template", req),
+
+  /** Pure policy tools (regenerate-ids, deduplicate, clear-rules, set-type, apply-preset, apply-rules) */
+  tool: (
+    tool: "regenerate-ids" | "deduplicate" | "clear-rules" | "set-type" | "apply-preset" | "apply-rules",
+    body: {
+      policy: WdacPolicy;
+      policyType?: "Base" | "Supplemental";
+      basePolicyId?: string;
+      presetId?: string;
+      bundles?: FileRuleBundle[];
+      scenarioOverride?: SigningScenarioValue;
+    }
+  ) => post<{ policy: WdacPolicy; xml: string; summary: Record<string, number> }>(`/policy/tools/${tool}`, body),
+};
+
+// ---------------------------------------------------------------------------
+// Files API — hashes, certificates, level-based rule generation
+// ---------------------------------------------------------------------------
+
+export const filesApi = {
+  inspect: (files: File[]) => {
+    const form = new FormData();
+    for (const f of files) form.append("files", f, f.name);
+    return postForm<{ files: InspectedFile[]; errors: Array<{ fileName: string; message: string }> }>("/files/inspect", form);
+  },
+
+  rules: (files: InspectedFile[], level: RuleLevel, opts: { effect?: "Allow" | "Deny"; fallbackToHash?: boolean; filePaths?: Record<string, string> } = {}) =>
+    post<{ bundles: FileRuleBundle[] }>("/files/rules", { files, level, ...opts }),
+
+  inspectCertificates: (files: File[]) => {
+    const form = new FormData();
+    for (const f of files) form.append("files", f, f.name);
+    return postForm<{ certificates: Array<InspectedCertificate & { fileName: string }> }>("/files/cert-inspect", form);
+  },
 };
 
 // ---------------------------------------------------------------------------

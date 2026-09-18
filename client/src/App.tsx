@@ -9,6 +9,9 @@ import { SecurityPage } from "./pages/SecurityPage.tsx";
 import { SimulatorPage } from "./pages/SimulatorPage.tsx";
 import { MergePage } from "./pages/MergePage.tsx";
 import { AppLockerPage } from "./pages/AppLockerPage.tsx";
+import { FileInspectorPage } from "./pages/FileInspectorPage.tsx";
+import { CreatePolicyPage } from "./pages/CreatePolicyPage.tsx";
+import { ValidatePage } from "./pages/ValidatePage.tsx";
 
 export default function App() {
   return (
@@ -26,6 +29,9 @@ export default function App() {
             <Route path="/simulator" element={<SimulatorPage />} />
             <Route path="/merge" element={<MergePage />} />
             <Route path="/applocker" element={<AppLockerPage />} />
+            <Route path="/create" element={<CreatePolicyPage />} />
+            <Route path="/files" element={<FileInspectorPage />} />
+            <Route path="/validate" element={<ValidatePage />} />
           </Routes>
         </main>
       </div>

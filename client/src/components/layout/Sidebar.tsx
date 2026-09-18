@@ -16,6 +16,9 @@ import {
   User,
   Merge,
   ArrowRightLeft,
+  FilePlus,
+  FileSearch,
+  BadgeCheck,
 } from "lucide-react";
 import clsx from "clsx";
 import { useAppStore } from "../../store/index.ts";
@@ -31,10 +34,28 @@ interface NavItem {
 
 const navItems: NavItem[] = [
   {
+    to: "/create",
+    label: "Create Policy",
+    icon: <FilePlus size={16} />,
+    description: "New base, supplemental, or deny policy",
+  },
+  {
     to: "/",
     label: "Policy Editor",
     icon: <FileText size={16} />,
     description: "Load, inspect, and modify policies",
+  },
+  {
+    to: "/files",
+    label: "File Inspector",
+    icon: <FileSearch size={16} />,
+    description: "Hashes, certificates, rules from files",
+  },
+  {
+    to: "/validate",
+    label: "Validate",
+    icon: <BadgeCheck size={16} />,
+    description: "Schema, references, binary conversion",
   },
   {
     to: "/compare",

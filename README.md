@@ -89,10 +89,41 @@ Leave `VITE_MSAL_CLIENT_ID` and `MSAL_CLIENT_ID` unset (or empty) to disable aut
 
 ## Features
 
+### Create Policy
+Start a new policy from the Microsoft templates that ship with Windows (`C:\Windows\schemas\CodeIntegrity\ExamplePolicies`, bundled under `server/templates`) — the same baselines AppControl Manager and the WDAC Wizard use:
+
+| Template | Category | Notes |
+|----------|----------|-------|
+| Allow Microsoft | base | Everything Microsoft-signed |
+| Default Windows | base | Only files that ship with Windows |
+| Signed and Reputable | base | Allow Microsoft + Intelligent Security Graph (options 14, 15) |
+| Strict Kernel-Mode | base | Kernel enforcement only, UMCI off |
+| Allow All / Deny All (Audit) | base | Telemetry and deny-policy scaffolds |
+| Deny Policy (scaffold) | deny | Two allow-all rules plus your deny rules (AppControl Manager style) |
+| Microsoft Recommended Driver Block Rules | block | Vulnerable-driver blocklist |
+| Blank Supplemental / Blank Base | supplemental / base | Empty starting points |
+
+Switches map to the documented options: Audit mode (3), Require EV signers (8), Script enforcement (11), Test mode (9 + 10), Allow supplemental (17), HVCI. Every template gets a fresh PolicyID.
+
+### File Inspector
+Drop executables, DLLs, drivers, scripts or MSI files (processed in memory, never written to disk) to get:
+
+- **Code Integrity hashes** — Authenticode SHA-1/SHA-256, header page hashes, and flat hashes, computed with the same algorithm as `New-CIPolicyRule -Level Hash` (verified byte-for-byte against ConfigCI output)
+- **Certificates** — the embedded Authenticode chain with per-certificate TBS hashes (hashed with the certificate's own signature digest, exactly as ConfigCI does), EKUs, well-known Microsoft root detection, timestamp and digest-match checks
+- **Version resource** — OriginalFilename, InternalName, ProductName, fixed file version
+- **Rule generation at any level** — Hash, FileName, FilePath, SignedVersion, Publisher, FilePublisher, LeafCertificate, PcaCertificate, RootCertificate, WHQL, WHQLPublisher, WHQLFilePublisher — with automatic fallback, Allow or Deny, added straight into the active policy
+- **Simulate this file** — hands the extracted metadata (hashes, chain TBS, EKUs, well-known root) to the Simulator
+
+### Validate
+AppControl Manager "Validate Policies" parity in four phases: cipolicy.xsd structural rules (ID patterns, GUID/hex/version formats), reference integrity (dangling refs, duplicate IDs, orphans), content checks (unsigned policy without option 6, supplemental option restrictions, kernel path rules, unsupported macros), and — on Windows hosts with the ConfigCI module — real `cipolicy.xsd` validation plus `ConvertFrom-CIPolicy` binary conversion with the resulting binary size.
+
 ### Policy Editor
 Load a WDAC policy XML file and inspect every component through tabbed views:
 
 - **Overview** — policy identity, mode (audit/enforcement), rule counts, and an automated security risk assessment that flags dangerous option combinations
+- **Details** — edit name, PolicyInfo Id, version, PolicyID / BasePolicyID, policy type (Base ⇄ Supplemental with option filtering), HVCI level, single ⇄ multiple policy format, and preserved `<Settings>`
+- **Tools** — regenerate IDs (schema-conformant, references remapped), deduplicate rules and signers, clear all rules, convert type
+- **Option presets** — pre-configured rule option sets for base, supplemental, ISG, managed installer, strict and test-mode policies
 - **Options** — toggle any of the 25 recognized policy rule options (including newer schema options like Conditional Windows Lockdown Policy) with descriptions of each
 - **File Rules** — searchable, filterable table of Allow/Deny/FileAttrib rules with type indicators (hash, path, publisher, package)
 - **Signers** — expandable signer list showing certificate root, publisher, issuer, EKU, and FileAttrib references
@@ -106,6 +137,9 @@ Sections:
 - File rule changes with field-level detail
 - Signer changes
 - Signing scenario membership changes (kernel and user mode)
+
+### Simulator
+Evaluates a binary against a policy in the documented order (deny file → deny signer → allow signer → allow file → default deny) with semantics validated against the Microsoft example policies: `FileName="*"` wildcards, CertRoot TBS matching against any certificate in the chain, CertEKU enforcement, exact Wellknown-root matching, PackageFamilyName rules, and path rules ignored in kernel mode.
 
 ### Import Events
 Parse CodeIntegrity event data from three sources:
@@ -200,6 +234,18 @@ All endpoints accept and return JSON. Every response is wrapped in `{ ok: true, 
 | `POST` | `/api/policy/explain` | Human-readable analysis and risk assessment |
 | `POST` | `/api/policy/from-events` | Build a policy from parsed CodeIntegrity events |
 | `GET`  | `/api/policy/options` | List all recognized policy rule options with descriptions |
+| `GET`  | `/api/policy/templates` | List policy templates and option presets |
+| `POST` | `/api/policy/from-template` | Create a policy from a template with the standard switches |
+| `POST` | `/api/policy/validate` | Four-phase validation (schema, references, content, ConvertFrom-CIPolicy) |
+| `POST` | `/api/policy/tools/:tool` | `regenerate-ids`, `deduplicate`, `clear-rules`, `set-type`, `apply-preset`, `apply-rules` |
+
+### Files
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/files/inspect` | Multipart upload → hashes, signature chains, version info, simulation metadata |
+| `POST` | `/api/files/rules` | Generate rule bundles for inspected files at a given rule level |
+| `POST` | `/api/files/cert-inspect` | Parse .cer/.crt/.pem/.p7b certificate files |
 
 ### Events
 

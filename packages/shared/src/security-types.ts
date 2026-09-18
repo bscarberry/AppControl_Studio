@@ -26,6 +26,8 @@ export type AuditEventType =
   // Policy lifecycle
   | "POLICY_LOADED"
   | "POLICY_GENERATED"
+  | "POLICY_VALIDATED"
+  | "FILES_INSPECTED"
   | "POLICY_COMPARED"
   | "POLICY_SEMANTIC_COMPARED"
   | "POLICY_EXPLAINED"

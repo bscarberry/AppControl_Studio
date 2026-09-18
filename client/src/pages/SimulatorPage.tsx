@@ -11,7 +11,7 @@
  *   5. Default deny
  */
 
-import { useState, useId } from "react";
+import { useState, useId, useEffect } from "react";
 import { useMutation } from "@tanstack/react-query";
 import {
   PlayCircle,
@@ -64,11 +64,13 @@ function phaseLabel(phase: EvalPhase): string {
     "deny-publisher": "Deny Publisher",
     "deny-path": "Deny Path",
     "deny-attribute": "Deny Attribute",
+    "deny-package": "Deny Package",
     "allow-publisher": "Allow Publisher",
     "allow-publisher-scoped": "Allow Publisher (Scoped)",
     "allow-hash": "Allow Hash",
     "allow-attribute": "Allow Attribute",
     "allow-path": "Allow Path",
+    "allow-package": "Allow Package",
     default: "Default",
   };
   return labels[phase] ?? phase;
@@ -413,6 +415,25 @@ export function SimulatorPage() {
   const [fileVersion, setFileVersion] = useState("");
   const [filePath, setFilePath] = useState("");
   const [isKernelMode, setIsKernelMode] = useState(false);
+  // Extra chain / EKU metadata handed over by the File Inspector (not editable here)
+  const [extra, setExtra] = useState<Pick<BinaryMetadata, "certChainTbs" | "leafEkus" | "wellknownRootId" | "packageFamilyName">>({});
+  const [prefilledFrom, setPrefilledFrom] = useState<string | null>(null);
+
+  // Prefill from File Inspector ("Simulate this file")
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem("acs.simulate.prefill");
+      if (!raw) return;
+      sessionStorage.removeItem("acs.simulate.prefill");
+      const m = JSON.parse(raw) as BinaryMetadata;
+      setSha256(m.sha256 ?? ""); setSha1(m.sha1 ?? "");
+      setSignerName(m.signerName ?? ""); setRootCertTbs(m.rootCertTbs ?? ""); setIssuerName(m.issuerName ?? "");
+      setOriginalFileName(m.originalFileName ?? ""); setInternalName(m.internalName ?? ""); setProductName(m.productName ?? "");
+      setFileVersion(m.fileVersion ?? ""); setFilePath(m.filePath ?? ""); setIsKernelMode(!!m.isKernelMode);
+      setExtra({ certChainTbs: m.certChainTbs, leafEkus: m.leafEkus, wellknownRootId: m.wellknownRootId, packageFamilyName: m.packageFamilyName });
+      setPrefilledFrom(m.originalFileName ?? "inspected file");
+    } catch { /* ignore */ }
+  }, []);
 
   const selectedSession = sessions.find((s) => s.id === selectedSessionId);
 
@@ -432,6 +453,7 @@ export function SimulatorPage() {
         fileVersion: fileVersion.trim() || undefined,
         filePath: filePath.trim() || undefined,
         isKernelMode,
+        ...extra,
       };
 
       return policyApi.simulate(binary, selectedSession.policy);
@@ -467,6 +489,11 @@ export function SimulatorPage() {
       <div className="flex-1 overflow-hidden flex min-h-0">
         {/* Left panel — inputs */}
         <div className="w-80 flex-shrink-0 border-r border-border overflow-y-auto p-4 space-y-5">
+          {prefilledFrom && (
+            <div className="text-[11px] p-2 rounded bg-accent-blue/10 border border-accent-blue/20 text-accent-blue">
+              Prefilled from File Inspector ({prefilledFrom}){extra.certChainTbs?.length ? ` — ${extra.certChainTbs.length} chain TBS hashes` : ""}{extra.leafEkus?.length ? `, ${extra.leafEkus.length} EKUs` : ""}{extra.wellknownRootId ? `, Wellknown root ${extra.wellknownRootId}` : ""} attached.
+            </div>
+          )}
 
           {/* Policy selector */}
           <div>
