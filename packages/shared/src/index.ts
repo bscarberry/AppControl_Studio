@@ -3,6 +3,24 @@ export { POLICY_RULE_OPTIONS, SIGNING_SCENARIO, SUPPLEMENTAL_ALLOWED_OPTIONS, WE
 export { CI_EVENT_IDS } from "./events";
 export { RULE_LEVELS } from "./file-inspection";
 export {
+  GRAPH_SCOPES,
+  GRAPH_ALL_SCOPES,
+  APP_CONTROL_ACTION_TYPES,
+  APP_CONTROL_DECISION_ACTION_TYPES,
+  normalizeAssignment,
+  flattenSettingInstance,
+  decodePolicyPayload,
+  normalizeSettingsCatalogPolicy,
+  isAppControlOmaProfile,
+  normalizeOmaUriPolicy,
+  evaluateEffectiveAssignment,
+  buildAppControlEventsQuery,
+  buildAppControlDeviceSummaryQuery,
+  buildPoliciesLoadedQuery,
+  buildDeviceLookupQuery,
+  normalizeManagedDevice,
+} from "./cloud";
+export {
   normalizeGuid,
   isValidGuid,
   newGuid,
@@ -193,6 +211,21 @@ export type {
   CreateFromTemplateResponse,
   PolicyTemplatesResponse,
 } from "./templates";
+
+// Type re-exports from cloud
+export type {
+  AssignmentTargetKind,
+  IntuneAssignment,
+  IntunePolicySource,
+  IntuneSettingPair,
+  IntuneAppControlPolicy,
+  DeviceMembership,
+  EffectiveStatus,
+  EffectiveAssignment,
+  HuntingTimespan,
+  HuntingResultSet,
+  IntuneDevice,
+} from "./cloud";
 
 // Type re-exports from api
 export type {

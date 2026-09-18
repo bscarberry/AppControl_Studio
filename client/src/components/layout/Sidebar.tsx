@@ -19,6 +19,7 @@ import {
   FilePlus,
   FileSearch,
   BadgeCheck,
+  Cloud,
 } from "lucide-react";
 import clsx from "clsx";
 import { useAppStore } from "../../store/index.ts";
@@ -86,6 +87,12 @@ const navItems: NavItem[] = [
     label: "Simulator",
     icon: <PlayCircle size={16} />,
     description: "Test allow/block decisions",
+  },
+  {
+    to: "/cloud",
+    label: "Intune & XDR",
+    icon: <Cloud size={16} />,
+    description: "Policy assignments and recent blocks",
   },
   {
     to: "/security",

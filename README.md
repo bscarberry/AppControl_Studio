@@ -40,7 +40,18 @@ Create an Azure AD App Registration with the following settings:
 | **Supported account types** | Accounts in this organizational directory only (single tenant) |
 | **Platform** | Single-page application (SPA) |
 | **Redirect URI** | `http://localhost:5173` (dev) or your production URL |
-| **API Permissions** | None — the app does not call Microsoft Graph or require any custom scope |
+| **API Permissions** | None for sign-in alone. For the **Intune & XDR** section add the delegated Microsoft Graph permissions below and grant admin consent. |
+
+#### Graph permissions for Intune & XDR (delegated, admin consent)
+
+| Permission | Used for |
+|-----------|----------|
+| `DeviceManagementConfiguration.Read.All` | App Control for Business policies, settings, assignments, assignment filters |
+| `DeviceManagementManagedDevices.Read.All` | Device search (name, user, serial) |
+| `Directory.Read.All` | Group display names; transitive group membership of the device and its primary user |
+| `ThreatHunting.Read.All` | Defender XDR Advanced Hunting (`security/runHuntingQuery`) |
+
+Graph is called **directly from the browser** with the signed-in user's token (incremental consent via a popup on first use). The AppControl Studio server never receives or proxies Graph tokens. Hunting results only reach the local server when you click *Import into Studio*.
 
 > "Expose an API" does **not** need to be configured. The app authenticates with standard OIDC scopes (`openid profile`) and passes the ID token to the backend for validation.
 >
@@ -137,6 +148,13 @@ Sections:
 - File rule changes with field-level detail
 - Signer changes
 - Signing scenario membership changes (kernel and user mode)
+
+### Intune & XDR
+Review what is actually assigned in the tenant and what is being blocked in the field:
+
+- **Policies** — every App Control for Business policy in Intune, from both the settings-catalog *Endpoint security → App Control for Business* template and legacy custom OMA-URI (`./Vendor/MSFT/ApplicationControl/…`) profiles. Shows assignments with resolved group and filter names, the flattened settings, built-in-controls mode, and decodes embedded SiPolicy XML (plain, base64 UTF-8 or UTF-16) so it can be opened in the editor, validated, simulated or diffed. Binary `.cip` payloads are flagged.
+- **Devices** — search Intune (or Defender `DeviceInfo`) for a device, then see: *effective App Control assignments* (All devices / All users / include and exclude groups resolved through transitive membership of the device object and its primary user, with assignment filters called out because Intune evaluates them at check-in), the policies the device has actually *loaded* (Defender `AppControlCodeIntegrityPolicyLoaded` telemetry), and its recent App Control blocks and audits (1/7/30 days, blocked-only toggle). One click imports those events into Import & Build / Rule Engine to produce supplemental rules. The landing view ranks devices by block and audit counts over the last 7 days.
+- **Hunting** — KQL presets (events, blocked only, per-device summary, policies loaded, top blocked files) or a custom query against `security/runHuntingQuery`; any result set with `ActionType` + `FileName` columns can be imported.
 
 ### Simulator
 Evaluates a binary against a policy in the documented order (deny file → deny signer → allow signer → allow file → default deny) with semantics validated against the Microsoft example policies: `FileName="*"` wildcards, CertRoot TBS matching against any certificate in the chain, CertEKU enforcement, exact Wellknown-root matching, PackageFamilyName rules, and path rules ignored in kernel mode.

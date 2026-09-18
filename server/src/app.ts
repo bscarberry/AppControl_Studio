@@ -52,8 +52,10 @@ const app = express();
 
   // When MSAL is enabled the browser needs to reach Microsoft's login endpoint
   // for the popup auth flow and silent token refresh iframes.
+  // Graph is called directly from the browser (Intune & XDR section) with the
+  // user's delegated token — the server never proxies or sees those tokens.
   const msalConnectSrc = isMsalAuthEnabled
-    ? ["https://login.microsoftonline.com", "https://login.microsoft.com"]
+    ? ["https://login.microsoftonline.com", "https://login.microsoft.com", "https://graph.microsoft.com"]
     : [];
   const msalFrameSrc = isMsalAuthEnabled
     ? ["https://login.microsoftonline.com"]

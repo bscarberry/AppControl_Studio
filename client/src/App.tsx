@@ -12,6 +12,7 @@ import { AppLockerPage } from "./pages/AppLockerPage.tsx";
 import { FileInspectorPage } from "./pages/FileInspectorPage.tsx";
 import { CreatePolicyPage } from "./pages/CreatePolicyPage.tsx";
 import { ValidatePage } from "./pages/ValidatePage.tsx";
+import { CloudPage } from "./pages/CloudPage.tsx";
 
 export default function App() {
   return (
@@ -32,6 +33,7 @@ export default function App() {
             <Route path="/create" element={<CreatePolicyPage />} />
             <Route path="/files" element={<FileInspectorPage />} />
             <Route path="/validate" element={<ValidatePage />} />
+            <Route path="/cloud" element={<CloudPage />} />
           </Routes>
         </main>
       </div>
